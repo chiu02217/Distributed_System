@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import file_operation_service_pb2 as file__operation__service__pb2
+from . import file_operation_service_pb2 as file__operation__service__pb2
 
 GRPC_GENERATED_VERSION = '1.75.1'
 GRPC_VERSION = grpc.__version__

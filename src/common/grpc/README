@@ -1,7 +1,54 @@
-Generate Code:
+# Distributed System Coursework
 
+## Quick Start
+
+### Install dependencies
+```bash
+pip install grpcio grpcio-tools
+```
+
+### Generate gRPC files
+```bash
+# run in the root directory
 python -m grpc_tools.protoc \
-  --python_out=auto_generated/ \
-  --grpc_python_out=auto_generated/ \
-  -I protos/ \
-  protos/file_operation_service.proto
+  --python_out=src/common/grpc/auto_generated \
+  --grpc_python_out=src/common/grpc/auto_generated \
+  --proto_path=src/common/grpc/protos \
+  src/common/grpc/protos/file_operation_service.proto
+```
+
+### Modify the import
+Open `src/common/grpc/auto_generated/file_operation_service_pb2_grpc.py`
+
+Change the line 6
+```python
+import file_operation_service_pb2 as file__operation__service__pb2
+```
+to:
+```python
+from . import file_operation_service_pb2 as file__operation__service__pb2
+```
+
+### Run
+
+**Terminal1 - Run Server：**
+```bash
+python src/afs/server/server.py
+```
+
+**Terminal2 - Run Client：**
+```bash
+echo "Hello World" > test.txt
+python src/afs/client/client.py --filename tests/test.txt --mode r
+```
+
+## Client Parameter
+
+- `--filename`: file name（necessary）
+- `--mode`: file mode (r/w)，'r' in default
+
+## Notes
+
+⚠️ All commands must be run from the project root directory.
+
+⚠️ After modifying `.proto` files, you need to regenerate and fix imports.

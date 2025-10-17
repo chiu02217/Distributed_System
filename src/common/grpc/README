@@ -1,0 +1,7 @@
+Generate Code:
+
+python -m grpc_tools.protoc \
+  --python_out=auto_generated/ \
+  --grpc_python_out=auto_generated/ \
+  -I protos/ \
+  protos/file_operation_service.proto

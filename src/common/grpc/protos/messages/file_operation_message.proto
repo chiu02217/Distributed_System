@@ -1,0 +1,59 @@
+syntax = "proto3";
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+package fileoperation;
+
+
+message OpenFileRequest {
+  string filename = 1;
+  string mode = 2;
+}
+
+message OpenFileResponse {
+  int32 handle = 1;
+  string error = 2;
+}
+
+message FileMetaData {
+  google.protobuf.StringValue filename = 1;
+  google.protobuf.Int64Value size = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  google.protobuf.Int32Value version = 4;
+  google.protobuf.StringValue checksum = 5;
+}
+message FileContent {
+    FileMetaData metadata = 1;
+    bytes content = 2;
+}
+
+message ReadFileRequest {
+    string filename = 1;
+}
+
+message ReadFileResponse {
+    bool success = 1;
+    string error_message = 2;
+    FileContent file = 3;
+}
+
+message WriteFileRequest {
+    FileContent file = 1;
+}
+
+message WriteFileResponse {
+    bool success = 1;
+    string error_message = 2;
+    int32 new_version = 3;
+}
+
+message CheckVersionRequest {
+    string filename = 1;
+    int32 client_version = 2;
+}
+
+message CheckVersionResponse {
+    bool is_valid = 1;
+    int32 current_version = 2;
+}

@@ -7,3 +7,5 @@ __pycache__/
 Thumbs.db
 desktop.ini
 .vscode/
+.venv/
+.idea/

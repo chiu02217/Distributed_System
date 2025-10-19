@@ -5,7 +5,6 @@ import "google/protobuf/wrappers.proto";
 
 package fileoperation;
 
-
 message OpenFileRequest {
   string filename = 1;
   string mode = 2;
@@ -13,6 +12,27 @@ message OpenFileRequest {
 
 message OpenFileResponse {
   int32 handle = 1;
+  bytes content = 2;
+  string error = 3;
+}
+
+message CreateFileRequest {
+  string filename = 1;
+} 
+
+message CreateFileResponse {
+  int32 handle = 1;
+  string error = 2;
+}
+
+message CloseFileRequest {
+  int32 handle =1;
+  bool modified = 2;
+  bytes content = 3;
+}
+
+message CloseFileResponse {
+  bool success = 1;
   string error = 2;
 }
 
@@ -23,6 +43,7 @@ message FileMetaData {
   google.protobuf.Int32Value version = 4;
   google.protobuf.StringValue checksum = 5;
 }
+
 message FileContent {
     FileMetaData metadata = 1;
     bytes content = 2;

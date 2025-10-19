@@ -43,7 +43,7 @@ class FileOperationClient:
     
     # get file info method
     @staticmethod
-    def get_file_info(filepath: str) -> Tuple[int, float]:
+    def get_file_info(filepath: str) -> tuple[int, float]:
         stat = os.stat(filepath)
         return stat.st_size, stat.st_mtime
 

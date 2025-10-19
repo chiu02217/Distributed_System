@@ -5,7 +5,9 @@ import "file_operation_message.proto";
 
 service FileOperationService {
     rpc OpenFile (OpenFileRequest) returns (OpenFileResponse);
-    rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
-    rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
-    rpc CheckFileVersion(CheckVersionRequest) returns (CheckVersionResponse);
+    rpc CreateFile (CreateFileRequest) returns (CreateFileResponse);
+    rpc CloseFile (CloseFileRequest) returns (CloseFileResponse);
+    rpc ReadFile (ReadFileRequest) returns (ReadFileResponse);
+    rpc WriteFile (WriteFileRequest) returns (WriteFileResponse);
+    rpc CheckFileVersion (CheckVersionRequest) returns (CheckVersionResponse);
 }

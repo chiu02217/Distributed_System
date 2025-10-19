@@ -1,20 +1,24 @@
 from concurrent import futures
 import grpc
-from src.common.grpc.auto_generated import file_operation_message_pb2 as file_operation_message
-from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as file_operation_service
+from src.common.grpc.auto_generated import file_operation_service_pb2
+from src.common.grpc.auto_generated import file_operation_service_pb2_grpc
 import os
 
 # service implementation, use the file_operation_service_pb2_grpc.py file
-class FileOperationServiceServicer(file_operation_service.FileOperationServiceServicer):
-    def __init__(self):
+class FileOperationServiceServicer(file_operation_service_pb2_grpc.FileOperationServiceServicer):
+    def __init__(self, input_folder="./data/server_storage/input"):
         self.file_handles = {}
         self.next_handle = 1
+        self.input_folder = input_folder
         
-    def OpenFile(self, request, context):
+        self.task_queue = []
+        self.current_task_id = 1
+
+    def Open(self, request, context):
         filename = request.filename
         mode = request.mode
-        response = file_operation_message.OpenFileResponse()
-
+        response = file_operation_service_pb2.OpenResponse()
+        
         try:
             if mode not in ['r', 'w']:
                 raise ValueError("Invalid mode. Use 'r' or 'w'.")
@@ -45,7 +49,7 @@ class FileOperationServiceServicer(file_operation_service.FileOperationServiceSe
 # start the server on port 8000
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=5)) # 5 threads for example
-    file_operation_service.add_FileOperationServiceServicer_to_server(FileOperationServiceServicer(), server)
+    file_operation_service_pb2_grpc.add_FileOperationServiceServicer_to_server(FileOperationServiceServicer(), server)
     server.add_insecure_port('[::]:8000')
     print("Server starts on port 8000")
     server.start()

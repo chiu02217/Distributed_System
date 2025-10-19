@@ -28,7 +28,22 @@ python -m grpc_tools.protoc \
 
 # fix relative imports
 echo "Patching generated files for relative imports..."
-sed -i '' 's/import file_operation_message_pb2/from . import file_operation_message_pb2/g' "$OUTPUT_DIR"/file_operation_service_*.py*
+
+# Fix file_operation_service imports
+for file in "$OUTPUT_DIR"/file_operation_service_*.py*; do
+    if [ -f "$file" ]; then
+        sed -i 's/import file_operation_message_pb2/from . import file_operation_message_pb2/g' "$file"
+        sed -i 's/import file_operation_service_pb2/from . import file_operation_service_pb2/g' "$file"
+    fi
+done
+
+# Fix coordinator_service imports if exists
+for file in "$OUTPUT_DIR"/coordinator_service_*.py*; do
+    if [ -f "$file" ]; then
+        sed -i 's/import coordinator_message_pb2/from . import coordinator_message_pb2/g' "$file"
+        sed -i 's/import coordinator_service_pb2/from . import coordinator_service_pb2/g' "$file"
+    fi
+done
 
 # create __init__.py
 touch "$OUTPUT_DIR/__init__.py"

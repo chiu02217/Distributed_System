@@ -9,23 +9,7 @@ pip install grpcio grpcio-tools
 
 ### Generate gRPC files
 ```bash
-# run in the ./scripts directory
 ./compile_proto.sh
-```
-
-### Modify the import
-Open `src/common/grpc/auto_generated/file_operation_service_pb2_grpc.py`
-
-Change the line 6 to:
-```python
-from . import file_operation_service_pb2 as file__operation__service__pb2
-```
-
-Open `src/common/grpc/auto_generated/file_operation_service_pb2.py`
-
-Change the line 25 to:
-```python
-from . import file_operation_service_pb2 as file__operation__service__pb2
 ```
 
 ### Run

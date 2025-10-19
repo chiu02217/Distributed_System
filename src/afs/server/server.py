@@ -1,59 +1,122 @@
 from concurrent import futures
 import grpc
-from src.common.grpc.auto_generated import file_operation_service_pb2
-from src.common.grpc.auto_generated import file_operation_service_pb2_grpc
 import os
+import sys
+import threading
+from src.common.grpc.auto_generated import file_operation_message_pb2 as messages
+from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as service
 
 # service implementation, use the file_operation_service_pb2_grpc.py file
-class FileOperationServiceServicer(file_operation_service_pb2_grpc.FileOperationServiceServicer):
-    def __init__(self, input_folder="./data/server_storage/input"):
-        self.file_handles = {}
-        self.next_handle = 1
-        self.input_folder = input_folder
+class FileOperationServiceServicer(service.FileOperationServiceServicer):
+    def __init__(self, input_dir, output_dir):
+        """
+        Initialize the FileOperationServiceServicer with an input directory.
+        Args:
+            input_dir (str): The directory where files are stored.
+            output_dir (str): The directory where output files will be saved.
+        """
+        self.input_dir = input_dir
+        self.output_dir = output_dir
         
-        self.task_queue = []
-        self.current_task_id = 1
+        self.file_handles = {} # {handle: {'filename', 'path', 'file_obj', 'mode'}}
+        self.next_handle = 1
+        self.handle_lock = threading.Lock()  # to ensure thread safety
+        
+        print(f"Server initialized: input_dir={self.input_dir}, output_dir={self.output_dir}")
 
-    def Open(self, request, context):
-        filename = request.filename
-        mode = request.mode
-        response = file_operation_service_pb2.OpenResponse()
+    def _get_file_path(self, filename):
+        if filename.startswith("input_dataset_"):
+            return os.path.join(self.input_dir, filename)
+        return os.path.join(self.output_dir, filename)
+
+    def OpenFile(self, request, context):
+        """
+        Handle the OpenFile gRPC request.
+        """
+        response = messages.OpenResponse()
         
         try:
-            if mode not in ['r', 'w']:
-                raise ValueError("Invalid mode. Use 'r' or 'w'.")
-            
-            if not os.path.exists(filename):
-                response.error = f"File does not exist: {filename}"
-                return response
-            
-            file = open(filename, mode)
-            
-            handle = self.next_handle
-            self.file_handles[handle] = file
+            file_path = self._get_file_path(request.filename)  ## fail check here
+            with open(file_path, 'r') as f:  # read file content
+                response.content = f.read()
+
+            with self.handle_lock:  # ensure thread safety
+                response.handle = self.next_handle
+                self.file_handles[self.next_handle] = {
+                    'filename': request.filename,
+                    'path': file_path,
+                }
             self.next_handle += 1
-            
-            response.handle = handle
-            print(f"Opened file {filename} in mode {mode} with handle {handle}")
-        
-        except PermissionError:
-            response.error = f"Permission denied: {filename}"
+
+            print(f"[Server] Opened file: {request.filename} with handle {self.next_handle}")
         except Exception as e:
-            response.error = f"Error opening file {filename}: {str(e)}"
-        
+            response.error = str(e)
         return response
     
-    # def Create(self, filename):
-    #     request = file_operation_service_pb2.CreateRequest(filename=filename)
+    def Create(self, request, context):
+        """
+        Handle the CreateFile gRPC request.
+        """
+        response = messages.CreateFileResponse()
+        
+        try:
+            file_path = self._get_file_path(request.filename)
+            with open(file_path, 'w') as f:  # create empty file
+                pass
 
+            with self.handle_lock:  # ensure thread safety
+                response.handle = self.next_handle
+                self.file_handles[self.next_handle] = {
+                    'filename': request.filename,
+                    'path': file_path,
+                }
+            self.next_handle += 1
+
+            print(f"[Server] Created file: {request.filename} with handle {self.next_handle}")
+        except Exception as e:
+            response.error = str(e)
+        return response
+    
+    def CloseFile(self, request, context):
+        """
+        Handle the CloseFile gRPC request.
+        """
+        response = messages.CloseFileResponse()
+        
+        handle = request.handle
+        try:
+            if handle not in self.file_handles:
+                response.error = f"Invalid handle: {handle}"
+                return response
+            
+            info = self.file_handles[handle]
+            if request.modified and request.content:
+                with open(info['path'], 'w') as f:
+                    f.write(request.content)
+                print(f"[Server] Updated file: {info['filename']} with handle {handle}")
+            
+            with self.handle_lock:
+                del self.file_handles[handle]
+
+            response.success = True
+            print(f"[Server] Closed file {info['filename']} with handle {handle}")
+        except Exception as e:
+            response.error = str(e)
+        return response
 # start the server on port 8000
-def serve():
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=5)) # 5 threads for example
-    file_operation_service_pb2_grpc.add_FileOperationServiceServicer_to_server(FileOperationServiceServicer(), server)
-    server.add_insecure_port('[::]:8000')
-    print("Server starts on port 8000")
-    server.start()
-    server.wait_for_termination()
+def serve(input_dir = './data/server_storage/input', output_dir = './data/server_storage/output', port=8000):
+    file_server = grpc.server(futures.ThreadPoolExecutor(max_workers=5)) # 5 threads for example
+    service.add_FileOperationServiceServicer_to_server(
+        FileOperationServiceServicer(input_dir, output_dir), file_server
+    )
+    file_server.add_insecure_port(f'[::]:{port}')
+    print(f"[Server] starts on port {port}")
+    file_server.start()
+    file_server.wait_for_termination()
 
 if __name__ == '__main__':
-    serve()
+    serve(
+        input_dir=sys.argv[1] if len(sys.argv) > 1 else './data/server_storage/input',
+        output_dir=sys.argv[2] if len(sys.argv) > 2 else './data/server_storage/output',
+        port=int(sys.argv[3]) if len(sys.argv) > 3 else 8000
+    )

@@ -7,7 +7,6 @@ package fileoperation;
 
 message OpenFileRequest {
   string filename = 1;
-  string mode = 2;
 }
 
 message OpenFileResponse {

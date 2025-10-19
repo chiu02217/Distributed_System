@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+import "coordinator_message.proto";
+
+service CoordinatorService {
+    rpc GetTask (GetTaskRequest) returns (GetTaskRequest);
+    rpc SubmitResult (SubmitResultRequest) returns (SubmitResultResponse);
+}

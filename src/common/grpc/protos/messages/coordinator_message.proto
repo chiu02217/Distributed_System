@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+message GetTaskRequest {
+    string worker_id = 1;
+}
+
+message GetTaskResponse {
+    string filename = 1;
+    bool has_task = 2;
+    int32 remaining = 3;
+}
+
+message SubmitResultRequest {
+    string worker_id = 1;
+    repeated int64 primes = 2;
+}
+
+message SubmitResultResponse {
+    bool success = 1;
+}

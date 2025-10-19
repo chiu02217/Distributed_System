@@ -103,6 +103,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         except Exception as e:
             response.error = str(e)
         return response
+    
 # start the server on port 8000
 def serve(input_dir = './data/server_storage/input', output_dir = './data/server_storage/output', port=8000):
     file_server = grpc.server(futures.ThreadPoolExecutor(max_workers=5)) # 5 threads for example
@@ -116,7 +117,7 @@ def serve(input_dir = './data/server_storage/input', output_dir = './data/server
 
 if __name__ == '__main__':
     serve(
-        input_dir=sys.argv[1] if len(sys.argv) > 1 else './data/server_storage/input',
-        output_dir=sys.argv[2] if len(sys.argv) > 2 else './data/server_storage/output',
-        port=int(sys.argv[3]) if len(sys.argv) > 3 else 8000
+        input_dir = sys.argv[1] if len(sys.argv) > 1 else './data/server_storage/input',
+        output_dir = sys.argv[2] if len(sys.argv) > 2 else './data/server_storage/output',
+        port = int(sys.argv[3]) if len(sys.argv) > 3 else 8000
     )

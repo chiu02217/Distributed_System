@@ -14,7 +14,9 @@ class Worker(IWorker):
         self.coordinator_channel = grpc.insecure_channel(coordinator_address)
         self.coordinator_stub = service.CoordinatorServiceStub(self.coordinator_channel)
         self.afs_client = AFSClient(server_address=file_server_address, cache_dir=cache_dir)
-        
+
+    
+
     def run_task(self):
         print(f"[Worker {self.worker_id}] Started!")
         # request new task from coordinator

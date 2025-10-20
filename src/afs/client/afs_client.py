@@ -1,9 +1,11 @@
 import grpc
 import os
+import re
+from src.afs.client.afs_client_interface import IAFSClient
 from src.common.grpc.auto_generated import file_operation_message_pb2 as messages
 from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as service
 
-class AFSClient:
+class AFSClient(IAFSClient):
     def __init__(self, server_address='localhost:8000', cache_dir='/tmp/afs'):
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -24,15 +26,55 @@ class AFSClient:
         local_path = os.path.join(self.cache_dir, filename)
         with open(local_path, 'w') as f:
             f.write(response.content)
-            
+        # Determine file mode
+        file_obj = open(local_path, 'r+')
+        # Store file info    
         self.open_files[response.handle] = {
             'filename': filename,
             'path': local_path,
-            'modified': False
+            'modified': False,
+            'file_obj': file_obj
         }
         return response.handle
     
-    def create(self, filename):
+    # write file content to local cache
+    # no need rpc call here
+    def write_file(self, handle, data):
+        if handle not in self.open_files:
+            print(f"[AFS] Error: Invalid file handle {handle}")
+            return None
+
+        file_info = self.open_files[handle]
+        try:
+            # Write data to local cached file
+            file_info['file_obj'].write(str(data) + '\n')
+            file_info['file_obj'].flush()
+            # Mark file as modified, important when you close the file
+            file_info['modified'] = True
+        except Exception as e:
+            print(f"[AFS] Error writing or flushing to file: {e}")
+            return False
+        
+        return True
+    # read a line(per number per line) from local cache file
+    def read_file(self, handle):
+        if handle not in self.open_files:
+            print(f"Read File Error {handle}")
+            return None
+
+        file_info = self.open_files[handle]
+        line = file_info['file_obj'].readline()
+        if not line:
+            return None
+        filter = re.search(r'\d+', line)
+        
+        # addressing number, only accept first number per line
+        if filter:
+            return filter.group(0)
+        else:
+            return None
+    
+    def create_file(self, filename):
         request = messages.CreateFileRequest(filename=filename)
         response = self.stub.Create(request)
         
@@ -60,15 +102,18 @@ class AFSClient:
         if handle in self.open_files:
             self.open_files[handle]['modified'] = True
             
-    def close(self, handle):
+    def close_file(self, handle):
         if handle not in self.open_files:
             print(f"[AFS] Invalid handle: {handle}")
-            return
+            return False
         
         file_info = self.open_files[handle]
-        content = b''  # create empty content
+        # create empty content if not modified
+        content = b''  
         
         if file_info['modified']:
+            # Close the file object before reading, avoid 讀到舊資料
+            file_info['file_obj'].close()
             with open(file_info['path'], 'rb') as f:
                 content = f.read()
                 

@@ -8,15 +8,19 @@ pip install grpcio grpcio-tools
 ```
 
 ### Generate gRPC files
+for linux, macOS
 ```bash
 ./compile_proto.sh
 ```
-
+for Windows
+```bash
+scripts/compile_proto.bat
+```
 ### Run
 
 **Terminal1 - Run Server：**
 ```bash
-python -m src.afs.server.server
+python -m src.afs.server.afs_server
 ```
 
 **Terminal2 - Run Client：**

@@ -27,6 +27,7 @@ python -m grpc_tools.protoc ^
 ::  fix relative imports
 echo Patching generated files for relative imports...
 powershell -Command "Get-ChildItem -Path '%OUTPUT_DIR%\file_operation_service_*.py*' | ForEach-Object { (Get-Content -Path $_.FullName -Raw) -replace 'import file_operation_message_pb2', 'from . import file_operation_message_pb2' | Set-Content -Path $_.FullName -Encoding utf8 }"
+powershell -Command "Get-ChildItem -Path '%OUTPUT_DIR%\coordinator_service_*.py*' | ForEach-Object { (Get-Content -Path $_.FullName -Raw) -replace 'import coordinator_message_pb2', 'from . import coordinator_message_pb2' | Set-Content -Path $_.FullName -Encoding utf8 }"
 :: directory
 echo. > "%OUTPUT_DIR%\__init__.py"
 

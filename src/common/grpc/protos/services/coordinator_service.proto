@@ -3,6 +3,6 @@ syntax = "proto3";
 import "coordinator_message.proto";
 
 service CoordinatorService {
-    rpc GetTask (GetTaskRequest) returns (GetTaskRequest);
+    rpc GetTask (GetTaskRequest) returns (GetTaskResponse);
     rpc SubmitResult (SubmitResultRequest) returns (SubmitResultResponse);
 }

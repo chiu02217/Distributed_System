@@ -19,7 +19,7 @@ class Worker(IWorker):
         print(f"[Worker {self.worker_id}] Started!")
         # request new task from coordinator
         while True:
-            task = self.coordinator_stub.GetTask(
+            task: messages.GetTaskResponse = self.coordinator_stub.GetTask(
                 messages.GetTaskRequest(worker_id=self.worker_id)
             )
             if not task.filename:

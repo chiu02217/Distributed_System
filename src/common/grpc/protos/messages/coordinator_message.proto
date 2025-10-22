@@ -19,5 +19,4 @@ message SubmitResultRequest {
 
 message SubmitResultResponse {
     bool success = 1;
-    google.protobuf.StringValue error_message = 2;
 }

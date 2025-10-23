@@ -15,61 +15,80 @@ class Worker(IWorker):
         self.coordinator_stub = service.CoordinatorServiceStub(self.coordinator_channel)
         self.afs_client = AFSClient(server_address=file_server_address, cache_dir=cache_dir)
 
-    
-
     def run_task(self):
         print(f"[Worker {self.worker_id}] Started!")
         # request new task from coordinator
         while True:
-            task: messages.GetTaskResponse = self.coordinator_stub.GetTask(
-                messages.GetTaskRequest(worker_id=self.worker_id)
-            )
-            if not task.filename:
+            try: 
+                task = self.coordinator_stub.GetTask(
+                    messages.GetTaskRequest(worker_id=self.worker_id)
+                )
+            except grpc.RpcError as e:
+                print(f"[Worker {self.worker_id}] gRPC error while getting task: {e}")
+                break
+            
+            if not task.has_task:
+                print(f"[Worker {self.worker_id}] No more tasks available. Exiting.")
                 break
             
             print(f"[Worker {self.worker_id}] Received task: {task.filename}")
             
-            file = self.afs_client.open(task.filename) 
-            # This will cause memorty issue if the file is too large
-            # with open(self.afs_client.get_local_path(local_path), 'r') as f:
-            #     numbers = [int(line.strip()) for line in f]
-            # self.afs_client.close(local_path)
-            if file is None:
-                print(f"[Worker {self.worker_id}] Error: Could not open file {task.filename}")
-                # skip this task
-                continue
+            success = self._process_task(task.filename)
+            
+    def _process_task(self, filename):
+        file_handle = None
+        
+        try:
+            file_handle = self.afs_client.open_file(filename)
+            
+            if file_handle is None:
+                print(f"[Worker {self.worker_id}] Error: Could not open file {filename}")
+                return False
+
+            print(f"[Worker {self.worker_id}] Processing file: {filename}")
 
             prime_numbers = set()
-            # read numbers from file and check for primes
+            line_counter = 0
+            
             while True:
-                # 之前設計的read_file func, every time only read one line
-                number_str = self.afs_client.read_file(file)
-                # meaning it is the end of file
+                number_str = self.afs_client.read_file(file_handle)
+                
                 if number_str is None:
-                    break 
+                    break
+                
+                line_counter += 1
+                
                 try:
                     n = int(number_str)
                     if PrimeAlgorithm.is_prime(n):
                         prime_numbers.add(n)
                 except ValueError:
                     print(f"[Worker {self.worker_id}] Skipping invalid line: {number_str}")
-            
-            self.coordinator_stub.SubmitResult(
-                messages.SubmitResultRequest(
-                    worker_id=self.worker_id,
-                    primes=prime_numbers,
-                    filename=task.filename
+                    continue
+                
+            try:
+                self.coordinator_stub.SubmitResult(
+                    messages.SubmitResultRequest(
+                        worker_id=self.worker_id,
+                        filename=filename,
+                        primes=list(prime_numbers)
+                    )
                 )
-            )
-
-            print(f"[Worker {self.worker_id}] Found {len(prime_numbers)} primes")
-        
-        print(f"[Worker {self.worker_id}] No more tasks. Exiting.")
+                print(f"[Worker {self.worker_id}] Submitted {len(prime_numbers)} primes from {filename}")
+                return True
+            except grpc.RpcError as e:
+                print(f"[Worker {self.worker_id}] gRPC error while submitting results: {e}")
+                return False
+                
+        finally:
+            if file_handle is not None:
+                self.afs_client.close_file(file_handle)
+                print(f"[Worker {self.worker_id}] Closed file {filename}")
 
 if __name__ == '__main__':
     worker = Worker(
         sys.argv[1] if len(sys.argv) > 1 else 'worker-1',
-        sys.argv[2] if len(sys.argv) > 2 else 'localhost:9000',
+        sys.argv[2] if len(sys.argv) > 2 else 'localhost:50000',
         sys.argv[3] if len(sys.argv) > 3 else 'localhost:8000',
         sys.argv[4] if len(sys.argv) > 4 else '/tmp/afs'
     )

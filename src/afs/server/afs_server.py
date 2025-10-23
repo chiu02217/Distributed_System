@@ -33,11 +33,11 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         """
         Handle the OpenFile gRPC request.
         """
-        response = messages.OpenResponse()
+        response = messages.OpenFileResponse()
         
         try:
             file_path = self._get_file_path(request.filename)  ## fail check here
-            with open(file_path, 'r') as f:  # read file content
+            with open(file_path, 'rb') as f:  # read file content
                 response.content = f.read()
 
             with self.handle_lock:  # ensure thread safety
@@ -91,7 +91,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             
             info = self.file_handles[handle]
             if request.modified and request.content:
-                with open(info['path'], 'w') as f:
+                with open(info['path'], 'wb') as f:
                     f.write(request.content)
                 print(f"[Server] Updated file: {info['filename']} with handle {handle}")
             
@@ -147,6 +147,25 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
 
         except Exception as e:
             response.error = str(e)
+        return response
+    
+    def ListFiles(self, request, context):
+        """
+        Handle the ListFiles gRPC request.
+        """
+        response = messages.ListFilesResponse()
+        
+        try:
+            input_files = os.listdir(self.input_dir)
+            filenames = [os.path.basename(f) for f in sorted(input_files)]
+            response.filenames.extend(filenames)
+            
+            print(f"[Server] ListFiles: found {len(filenames)} files.")
+            for filename in filenames:
+                print(f" - {filename}")
+        except Exception as e:
+            response.error = str(e)
+            print(f"[Server] Error listing files: {e}")
         return response
 
 # start the server on port 8000

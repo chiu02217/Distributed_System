@@ -34,19 +34,6 @@ message CloseFileResponse {
   string error = 2;
 }
 
-message FileMetaData {
-  google.protobuf.StringValue filename = 1;
-  google.protobuf.Int64Value size = 2;
-  google.protobuf.Timestamp timestamp = 3;
-  google.protobuf.Int32Value version = 4;
-  google.protobuf.StringValue checksum = 5;
-}
-
-message FileContent {
-    FileMetaData metadata = 1;
-    bytes content = 2;
-}
-
 message ReadFileRequest {
     string filename = 1;
 }
@@ -65,6 +52,26 @@ message WriteFileResponse {
     bool success = 1;
     string error_message = 2;
     int32 new_version = 3;
+}
+
+message ListFilesRequest {}
+
+message ListFilesResponse {
+  repeated string filenames = 1;
+  string error = 2;
+}
+
+message FileMetaData {
+  google.protobuf.StringValue filename = 1;
+  google.protobuf.Int64Value size = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  google.protobuf.Int32Value version = 4;
+  google.protobuf.StringValue checksum = 5;
+}
+
+message FileContent {
+    FileMetaData metadata = 1;
+    bytes content = 2;
 }
 
 message CheckVersionRequest {

@@ -11,24 +11,24 @@ from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as servi
 from src.afs.client.afs_client import AFSClient
 
 class CoordinatorServicer(service.CoordinatorServiceServicer):
-    def __init__(self, input_dir, afs_server_address):
+    def __init__(self, afs_server_address):
         self.task_queue = Queue()
         self.all_primes = set() # set store unique primes
         self.queue_lock = threading.Lock()
         self.result_lock = threading.Lock()
+        
+        print(f"[Coordinator] Connecting to AFS at {afs_server_address}...")
         self.afs_client = AFSClient(server_address=afs_server_address)
         
-        # tasks management
+        # task management
         self.total_tasks = 0
         self.completed_tasks = 0
         self.is_finished = False
         
-        for f in sorted (glob.glob(os.path.join(input_dir, 'input_dataset_*.txt'))):
-            filename = os.path.basename(f)
-            self.task_queue.put(filename)
-            self.total_tasks += 1
+        # load tasks from AFS system
+        self._load_tasks_from_afs()
         
-        print(f"[Coordinator] Loaded {self.total_tasks} tasks from {input_dir}")
+        print(f"[Coordinator] Loaded {self.total_tasks} tasks from AFS.")
         
     def GetTask(self, request, context):
         """
@@ -72,15 +72,32 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
         if handle is None:
             print(f"[Coordinator] Error creating file {file_path} in AFS.")
             return
-
-        for prime in sorted(self.all_primes):
-            self.afs_client.write_file(handle, str(prime))
+        try:
+            for prime in sorted(self.all_primes):
+                self.afs_client.write_file(handle, str(prime))
+            
+            self.afs_client.close_file(handle)
+            print(f"[Coordinator] Saved {len(self.all_primes)} unique primes to {file_path}")
+        except Exception as e:
+            print(f"[Coordinator] Error saving results to AFS: {e}")
+            
+    # load tasks from AFS into the task queue
+    def _load_tasks_from_afs(self):
+        try:
+            filenames = self.afs_client.list_files()
+            if not filenames:
+                print("[Coordinator] No files found in AFS.")
+                return
+            
+            for filename in filenames:
+                self.task_queue.put(filename)
+                self.total_tasks += 1
+                print(f"[Coordinator] Loaded task: {filename}")
+        except Exception as e:
+            print(f"[Coordinator] Error loading tasks from AFS: {e}")    
         
-        self.afs_client.close_file(handle)
-        print(f"[Coordinator] Saved {len(self.all_primes)} unique primes to {file_path}")
-                
-def run_server(input_dir, afs_server_address, port):
-    coordinator_servicer = CoordinatorServicer(input_dir, afs_server_address)
+def run_server(afs_server_address, port):
+    coordinator_servicer = CoordinatorServicer(afs_server_address)
     coordinator_server = grpc.server(futures.ThreadPoolExecutor(max_workers=5))
     service.add_CoordinatorServiceServicer_to_server(
         coordinator_servicer, coordinator_server
@@ -105,7 +122,6 @@ def run_server(input_dir, afs_server_address, port):
     
 if __name__ == '__main__':
     run_server(
-        input_dir = sys.argv[1] if len(sys.argv) > 1 else './data/server_storage/input',
-        afs_server_address = sys.argv[2] if len(sys.argv) > 2 else 'localhost:8000', 
-        port = int(sys.argv[3]) if len(sys.argv) > 3 else 9000
+        afs_server_address = sys.argv[1] if len(sys.argv) > 1 else 'localhost:8000', 
+        port = int(sys.argv[2]) if len(sys.argv) > 2 else 9000
     )

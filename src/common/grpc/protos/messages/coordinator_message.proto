@@ -1,5 +1,4 @@
 syntax = "proto3";
-import "google/protobuf/wrappers.proto";
 
 message GetTaskRequest {
     string worker_id = 1;

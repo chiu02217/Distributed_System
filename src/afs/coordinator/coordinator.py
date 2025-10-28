@@ -9,6 +9,8 @@ import threading
 from src.common.grpc.auto_generated import coordinator_message_pb2 as messages
 from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as service
 from src.afs.client.afs_client import AFSClient
+from src.common.grpc.auto_generated import coordinator_service_pb2
+
 
 class CoordinatorServicer(service.CoordinatorServiceServicer):
     def __init__(self, afs_server_address):
@@ -27,6 +29,11 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
         
         # load tasks from AFS system
         self._load_tasks_from_afs()
+
+        #heartbeat logs
+        self.last_heartbeat = {}
+        self.timeout_threshold = 10  # seconds
+        threading.Thread(target=self._monitor_heartbeats, daemon=True).start()
         
         print(f"[Coordinator] Loaded {self.total_tasks} tasks from AFS.")
         
@@ -94,7 +101,23 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
                 self.total_tasks += 1
                 print(f"[Coordinator] Loaded task: {filename}")
         except Exception as e:
-            print(f"[Coordinator] Error loading tasks from AFS: {e}")    
+            print(f"[Coordinator] Error loading tasks from AFS: {e}")   
+
+
+    def Heartbeat(self, request, context):
+        worker_id = request.worker_id
+        self.last_heartbeat[worker_id] = time.time()
+        print(f"[Coordinator] Heartbeat received from {worker_id}")
+        return coordinator_service_pb2.HeartbeatResponse(acknowledged=True) 
+    
+    def _monitor_heartbeats(self):
+        # might have to change the while loop
+        while self.completed_tasks < self.total_tasks:
+            now = time.time()
+            for worker_id, last_seen in list(self.last_heartbeat.items()):
+                if now - last_seen > self.timeout_threshold:
+                    print(f"[Coordinator] Worker {worker_id} timed out")
+            time.sleep(2)
         
 def run_server(afs_server_address, port):
     coordinator_servicer = CoordinatorServicer(afs_server_address)

@@ -14,7 +14,7 @@ This folder contains test cases for fault scenarios and solutions
 pip install grpcio grpcio-tools
 ```
 ## Run
-python -m tests.fault_tolerance.ft1_task_reassignment
+python -m tests.fault_tolerance.ft1_task_worker_crash_detection
 
 ## Rerun
 ```powershell
@@ -29,7 +29,18 @@ Replace LSITENING with the number
 # Scenario 1
 Worker crashes mid work
 Coordinator able to detect worker failure
-Coordinator reassigns work marked "in progress"
+
+## Example
+### running on input_dataset_001.txt, input_dataset_002
+output:
+2
+3
+5
+7
+19
+23
+113
+
 
 
 

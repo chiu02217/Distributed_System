@@ -5,6 +5,9 @@ from src.afs.client.afs_client import AFSClient
 from src.app.worker.worker_interface import IWorker
 from src.common.grpc.auto_generated import coordinator_message_pb2 as messages
 from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as service
+from src.common.grpc.auto_generated import coordinator_service_pb2
+import threading
+import time
 
 # prime number searching algo
     
@@ -14,6 +17,10 @@ class Worker(IWorker):
         self.coordinator_channel = grpc.insecure_channel(coordinator_address)
         self.coordinator_stub = service.CoordinatorServiceStub(self.coordinator_channel)
         self.afs_client = AFSClient(server_address=file_server_address, cache_dir=cache_dir)
+
+        # start heartbeat thread
+        self.stop_heartbeat = threading.Event()
+        threading.Thread(target=self._send_heartbeat, daemon=True).start()
 
     def run_task(self):
         print(f"[Worker {self.worker_id}] Started!")
@@ -29,12 +36,29 @@ class Worker(IWorker):
             
             if not task.has_task:
                 print(f"[Worker {self.worker_id}] No more tasks available. Exiting.")
+                #stop heartbeat after tasks complete
+                self.stop_heartbeat.set()
                 break
             
             print(f"[Worker {self.worker_id}] Received task: {task.filename}")
             
             success = self._process_task(task.filename)
+
+
+    # sends heartbeat every three seconds
+    def _send_heartbeat(self):
+        while not self.stop_heartbeat.is_set():
+            try:
+                self.coordinator_stub.Heartbeat(
+                    coordinator_service_pb2.HeartbeatRequest(worker_id=self.worker_id)
+                )
+                print(f"[Worker {self.worker_id}] Sent heartbeat")
+            except grpc.RpcError as e:
+                print(f"[Worker {self.worker_id}] Heartbeat failed: {e}")
+            time.sleep(3)
             
+
+
     def _process_task(self, filename):
         file_handle = None
         

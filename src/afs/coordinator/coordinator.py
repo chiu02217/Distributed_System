@@ -16,6 +16,9 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
         self.all_primes = set() # set store unique primes
         self.queue_lock = threading.Lock()
         self.result_lock = threading.Lock()
+        self.assigned_tasks = {}   # 记录每个 worker 当前正在处理的任务
+        
+        
         
         print(f"[Coordinator] Connecting to AFS at {afs_server_address}...")
         self.afs_client = AFSClient(server_address=afs_server_address)
@@ -43,9 +46,13 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
             response.has_task = True
             response.filename = self.task_queue.get()
             response.remaining = self.task_queue.qsize()
-            
+            self.assigned_tasks[request.worker_id] = response.filename
+
             print(f"[Coordinator] Assigned task: {response.filename}, Remaining tasks: {response.remaining}")
             return response
+        
+
+
         
     def SubmitResult(self, request, context):
         """
@@ -54,15 +61,30 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
         with self.result_lock:
             self.all_primes.update(request.primes)
             self.completed_tasks += 1
-            
+            self.assigned_tasks.pop(request.worker_id, None)
+
             print(f"[Coordinator] Completed tasks: {self.completed_tasks}/{self.total_tasks}")
             
             if self.completed_tasks == self.total_tasks and not self.is_finished:
                 self.is_finished = True
                 print("[Coordinator] All tasks completed. Saving results...")
                 self._save_results()
+            
 
         return messages.SubmitResultResponse(success=True) 
+    
+    def reassign_task(self, worker_id):
+        """
+         Called when a worker fails or times out (detected by heartbeat thread).
+         Reassigns the unfinished task back to the queue.
+        """
+        if worker_id in self.assigned_tasks:
+           lost_task = self.assigned_tasks.pop(worker_id)
+           self.task_queue.put(lost_task)
+           print(f"[Coordinator] Reassigned task {lost_task} from failed worker {worker_id}")
+        else:
+           print(f"[Coordinator] No active task found for worker {worker_id}")
+
         
     # save results to output file
     def _save_results(self):

@@ -8,12 +8,14 @@ message GetTaskResponse {
     string filename = 1;
     bool has_task = 2;
     int32 remaining = 3;
+    int32 snapshot_id = 4;
 }
 
 message SubmitResultRequest {
     string worker_id = 1;
     repeated int64 primes = 2;
     string filename = 3;
+    int32 snapshot_id = 4;
 }
 
 message SubmitResultResponse {

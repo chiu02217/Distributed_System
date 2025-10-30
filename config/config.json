@@ -1,0 +1,17 @@
+{
+    "worker": 
+        {
+            "worker_snapshot_port": 9001,
+            "worker_snapshot_max_workers": 3
+        },
+    "afs":
+        {
+            "afs_temp_path": "/afs/temp",
+            "server_address": "localhost:8000"
+        },
+    "coordinator":
+        {
+            "coordinator_address": "localhost:50001",
+            "port": 50001
+        }
+}

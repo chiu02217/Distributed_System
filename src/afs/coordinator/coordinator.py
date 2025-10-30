@@ -9,13 +9,15 @@ import threading
 from src.common.grpc.auto_generated import coordinator_message_pb2 as messages
 from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as service
 from src.afs.client.afs_client import AFSClient
+from src.common.utils import CONFIG
 
 class CoordinatorServicer(service.CoordinatorServiceServicer):
-    def __init__(self, afs_server_address):
+    def __init__(self):
         self.task_queue = Queue()
         self.all_primes = set() # set store unique primes
-        self.queue_lock = threading.Lock()
-        self.result_lock = threading.Lock()
+        self.task_lock = threading.Lock()
+        self.primes_lock = threading.Lock()
+        afs_server_address = CONFIG.afs.server_address
         self.assigned_tasks = {}   # 记录每个 worker 当前正在处理的任务
         
         
@@ -32,13 +34,12 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
         self._load_tasks_from_afs()
         
         print(f"[Coordinator] Loaded {self.total_tasks} tasks from AFS.")
-        
+
+    # Handle the GetTask gRPC request. 
     def GetTask(self, request, context):
-        """
-        Handle the GetTask gRPC request.
-        """
+
         response = messages.GetTaskResponse()
-        with self.queue_lock:
+        with self.task_lock:
             if self.task_queue.empty():
                 response.has_task = False
                 return response
@@ -53,13 +54,13 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
         
 
 
-        
+    # Handle the SubmitResult gRPC request.
     def SubmitResult(self, request, context):
-        """
-        Handle the SubmitResult gRPC request.
-        """
-        with self.result_lock:
+
+        with self.primes_lock:
             self.all_primes.update(request.primes)
+
+        with self.task_lock:
             self.completed_tasks += 1
             self.assigned_tasks.pop(request.worker_id, None)
 
@@ -69,21 +70,20 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
                 self.is_finished = True
                 print("[Coordinator] All tasks completed. Saving results...")
                 self._save_results()
-            
 
-        return messages.SubmitResultResponse(success=True) 
+        return messages.SubmitResultResponse(success=True)
     
+
+    # Called when a worker fails or times out (detected by heartbeat thread).
+    # Reassigns the unfinished task back to the queue.
     def reassign_task(self, worker_id):
-        """
-         Called when a worker fails or times out (detected by heartbeat thread).
-         Reassigns the unfinished task back to the queue.
-        """
-        if worker_id in self.assigned_tasks:
-           lost_task = self.assigned_tasks.pop(worker_id)
-           self.task_queue.put(lost_task)
-           print(f"[Coordinator] Reassigned task {lost_task} from failed worker {worker_id}")
-        else:
-           print(f"[Coordinator] No active task found for worker {worker_id}")
+        with self.task_lock:
+            if worker_id in self.assigned_tasks:
+                lost_task = self.assigned_tasks.pop(worker_id)
+                self.task_queue.put(lost_task)
+                print(f"[Coordinator] Reassigned task {lost_task} from failed worker {worker_id}")
+            else:
+                print(f"[Coordinator] No active task found for worker {worker_id}")
 
         
     # save results to output file
@@ -118,8 +118,9 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
         except Exception as e:
             print(f"[Coordinator] Error loading tasks from AFS: {e}")    
         
-def run_server(afs_server_address, port):
-    coordinator_servicer = CoordinatorServicer(afs_server_address)
+def run_server():
+    port = CONFIG.coordinator.port
+    coordinator_servicer = CoordinatorServicer()
     coordinator_server = grpc.server(futures.ThreadPoolExecutor(max_workers=5))
     service.add_CoordinatorServiceServicer_to_server(
         coordinator_servicer, coordinator_server
@@ -143,7 +144,4 @@ def run_server(afs_server_address, port):
         coordinator_server.stop(0)
     
 if __name__ == '__main__':
-    run_server(
-        afs_server_address = sys.argv[1] if len(sys.argv) > 1 else 'localhost:8000', 
-        port = int(sys.argv[2]) if len(sys.argv) > 2 else 9000
-    )
+    run_server()

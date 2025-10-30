@@ -1,0 +1,19 @@
+syntax = "proto3";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+message TriggerSnapshotRequest {
+    int32 snapshot_id = 1;
+}
+message TriggerSnapshotResponse {
+    bool success = 1;
+}
+
+message RegisterWorkerIdRequest {
+    string worker_id = 1;
+    string worker_address = 2;
+}
+message RegisterWorkerIdResponse {
+    bool success = 1;
+    google.protobuf.StringValue error_message = 2;
+}

@@ -4,7 +4,6 @@ import sys
 from unittest.mock import patch, mock_open
 import importlib
 
-# (同樣，不要在這裡匯入 app_config)
 
 class TestAppConfig(unittest.TestCase):
     
@@ -64,8 +63,6 @@ class TestAppConfig(unittest.TestCase):
         # 我們需要重設 mock_open 的 "read data"
         self.mock_file_open.return_value = mock_open(read_data=valid_json).return_value
 
-    # --- 您的所有測試函式 (test_01... test_04) 保持不變 ---
-    # (貼上您之前的 test_01 到 test_04 函式到這裡)
 
     def test_01_autoloader_nested_dict(self):
         print("\n--- 測試：自動載入器 (巢狀) ---")
@@ -91,7 +88,7 @@ class TestAppConfig(unittest.TestCase):
 
     def test_03_load_config_bad_json(self):
         print("\n--- 測試：載入失敗 (JSON 格式錯誤) ---")
-        bad_json_data = '{"key": "value", }' # Extra comma
+        bad_json_data = '{"key": "value", }' 
         self.mock_file_open.return_value = mock_open(read_data=bad_json_data).return_value
 
         self.app_config_module.load_config()
@@ -111,6 +108,5 @@ class TestAppConfig(unittest.TestCase):
         self.assertEqual(self.app_config_module.settings.COORDINATOR_ADDRESS, "mock_coord:1234")
         self.assertEqual(self.app_config_module.settings.worker.WORKER_SNAPSHOT_PORT, 9999)
 
-# (if __name__ == '__main__' 保持不變)
 if __name__ == '__main__':
     unittest.main()

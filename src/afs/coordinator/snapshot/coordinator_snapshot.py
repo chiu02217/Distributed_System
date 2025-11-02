@@ -2,15 +2,16 @@ import threading
 import time
 import json
 from src.common.grpc.auto_generated import coordinator_message_pb2 as messages
+from src.afs.coordinator.snapshot.i_coordinator_snapshot import ICoordinatorSnapshotHandler
 from typing import TYPE_CHECKING 
 
 if TYPE_CHECKING:
-    from src.afs.coordinator.coordinator import CoordinatorServicer 
+    from src.afs.coordinator.coordinator_server import CoordinatorServicer 
 
 # snapshot frequency
 SNAPSHOT_FREQUENCY_SECONDS = 30
 
-class SnapshotManager:
+class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
     def __init__(self, coordinator: 'CoordinatorServicer'):
         self.coordinator = coordinator
         self.afs_client = coordinator.afs_client
@@ -22,19 +23,20 @@ class SnapshotManager:
     # backeground thread(trigger snapshot periodically)
     def start_snapshot_thread(self):
         print("[SnapshotManager] Starting snapshot thread...")
-        thread = threading.Thread(target=self._snapshot_loop, daemon=True)
+        thread = threading.Thread(target=self.snapshot_loop, daemon=True)
         thread.start()
 
     # every 30s take a snapshot
-    def _snapshot_loop(self):
+    def snapshot_loop(self):
         while True:
             time.sleep(SNAPSHOT_FREQUENCY_SECONDS)
-            self._initiate_snapshot()
+            self.initiate_snapshot()
 
     # Chandy Lamport
-    def _initiate_snapshot(self):
-        # id from 0
-        snapshot_id = self.current_snapshot_id
+    def initiate_snapshot(self):
+        # id from 1
+        self.current_snapshot_id += 1
+        snapshot_id = self.current_snapshot_id + 1
         print(f"[SnapshotManager] Snapshot {snapshot_id}")
         #  Coordinator state
         coord_state = {}
@@ -54,26 +56,25 @@ class SnapshotManager:
         self._save_state_to_afs(state_filename, coord_state)
         
         # get worker list
-        workers = self._get_all_worker_ids()
+        workers = self.get_all_worker_ids()
         self.snapshot_state[snapshot_id] = {
             "coordinator_state_saved": True,
             "channels_to_record": workers.copy(),
             "channel_messages": {worker_id: [] for worker_id in workers}
         }
         
-        # 標記已發送給所有 Worker (在下次 GetTask 時)
+        # 已發送給所有 Worker (在下次 GetTask 時)
         print(f"[SnapshotManager] Coordinator state saved for snapshot {snapshot_id}.")
-        self.current_snapshot_id += 1
 
-    # attach snapshot_id to outgoing GetTaskResponse
-    def send_snapshot_id_to_worker(self, response):
+    # send snapshot_id to worker
+    def send_snapshot_id_to_worker(self, response: messages.GetTaskResponse):
         response.snapshot_id = self.current_snapshot_id
 
     # add marker to incoming SubmitResultRequest
     # 2 duties:
     # a. Chandy-Lamport Receiver Rule
     # b. Record in-flight messages
-    def process_incoming_result_from_worker(self, request):
+    def process_result_from_worker(self, request: messages.SubmitResultRequest):
         worker_id = request.worker_id
         incoming_snapshot_id = getattr(request, "snapshot_id", None)
         filename = getattr(request, "filename", None)
@@ -90,7 +91,7 @@ class SnapshotManager:
             if incoming_snapshot_id not in self.snapshot_state:
                 return
 
-            state_data = self.snapshot_state[incoming_snapshot_id]
+            state_data: dict = self.snapshot_state[incoming_snapshot_id]
 
             # Receiver rule: first marker from this worker for this snapshot
             if worker_id in state_data.get("channels_to_record", []):
@@ -100,7 +101,7 @@ class SnapshotManager:
                 # persist recorded in-flight messages for this channel
                 msgs = state_data.get("channel_messages", {}).get(worker_id, [])
                 channel_filename = f"snapshot_channel_W-C_{worker_id}_{incoming_snapshot_id}.json"
-                self._save_state_to_afs(channel_filename, msgs)
+                self.save_state_to_afs(channel_filename, msgs)
 
                 # if all channels done, finalize snapshot
                 if not state_data.get("channels_to_record"):
@@ -124,7 +125,7 @@ class SnapshotManager:
                         data["channel_messages"][worker_id].append(filename)
 
 
-    def _save_state_to_afs(self, filename, state_data):
+    def save_state_to_afs(self, filename, state_data):
         handle = self.afs_client.create_file(filename)
         if handle is None:
             print(f"[SnapshotManager] AFS Error: Could not create snapshot file {filename}")
@@ -143,7 +144,7 @@ class SnapshotManager:
             print(f"[SnapshotManager] Saved state to {filename}")
             
 
-    # # get all registered worker ids        
-    # def _get_all_worker_ids(self):
-    #     with self.coordinator.:
-    #         return set(self.coordinator.workers.keys())
+    # get all registered worker ids        
+    def get_all_worker_ids(self):
+        with self.coordinator.worker_regis_lock:
+            return set(self.coordinator.workers.keys())

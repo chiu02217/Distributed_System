@@ -1,7 +1,7 @@
 import grpc
 import os
 import re
-from src.afs.client.afs_client_interface import IAFSClient
+from src.afs.afs_client.i_afs_client import IAFSClient
 from src.common.grpc.auto_generated import file_operation_message_pb2 as messages
 from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as service
 

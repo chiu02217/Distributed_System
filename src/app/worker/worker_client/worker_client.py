@@ -4,8 +4,8 @@ import threading
 import json       
 import time       
 from src.common.prime_algo import PrimeAlgorithm
-from src.afs.client.afs_client import AFSClient
-from src.app.worker.worker_client.i_worker import IWorker
+from src.afs.afs_client.afs_client import AFSClient
+from src.app.worker.worker_client.i_worker_client import IWorker
 from src.app.worker.snapshot.worker_snapshot import WorkerSnapshotHandler
 from src.common.grpc.auto_generated import coordinator_message_pb2 as coordinator_messages
 from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as coordinator_service
@@ -18,7 +18,7 @@ from src.app.worker.worker_server import worker_server
 class Worker(IWorker):
     def __init__(self, worker_id, worker_port):
         self.worker_id = worker_id
-        self.worker_port = worker_port # 儲存埠號 (整數)
+        self.worker_port = worker_port 
         
         coordinator_address = CONFIG.coordinator.coordinator_address
         file_server_address = CONFIG.afs.server_address

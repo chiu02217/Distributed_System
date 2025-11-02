@@ -15,17 +15,17 @@ class _ConfigLoader:
 
 
 
-def load_config(config_path='config/config.json'):
-    if not os.path.exists(config_path):
-        print(f"error: config file not found: {config_path}")
-        sys.exit(1)
-        
-    with open(config_path, 'r') as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            print(f"{config_path} format not correct。")
+    def load_config(config_path='config/config.json'):
+        if not os.path.exists(config_path):
+            print(f"error: config file not found: {config_path}")
             sys.exit(1)
+            
+        with open(config_path, 'r') as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                print(f"{config_path} format not correct。")
+                sys.exit(1)
 
-_loaded_config_dict = load_config()
+_loaded_config_dict = _ConfigLoader.load_config()
 CONFIG = _ConfigLoader(config_dict=_loaded_config_dict)

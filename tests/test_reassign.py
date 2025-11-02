@@ -1,4 +1,4 @@
-from src.afs.coordinator.coordinator import CoordinatorServicer
+from src.afs.coordinator.coordinator_server import CoordinatorServicer
 
 print("✅ Test file loaded successfully!")  # 调试用
 

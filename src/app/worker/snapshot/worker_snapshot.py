@@ -3,7 +3,7 @@ from src.app.worker.snapshot.i_worker_snapshot import IWorkerSnapshotHandler
 from typing import TYPE_CHECKING # <-- 1. 匯入 TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.app.worker.worker_client.worker import Worker 
+    from src.app.worker.worker_client.worker_client import Worker 
 
 class WorkerSnapshotHandler(IWorkerSnapshotHandler):
     def __init__(self, worker_instance: Worker):

@@ -8,7 +8,10 @@ from queue import Queue
 import threading
 from src.common.grpc.auto_generated import coordinator_message_pb2 as messages
 from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as service
-from src.afs.client.afs_client import AFSClient
+from src.common.grpc.auto_generated import snapshot_service_pb2_grpc as snapshot_service
+from src.common.grpc.auto_generated import snapshot_message_pb2 as snapshot_messages
+from src.afs.coordinator.snapshot.coordinator_snapshot import CoordinatorSnapshotHandler
+from src.afs.afs_client.afs_client import AFSClient
 from src.common.utils import CONFIG
 
 class CoordinatorServicer(service.CoordinatorServiceServicer):
@@ -19,6 +22,12 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
         self.primes_lock = threading.Lock()
         afs_server_address = CONFIG.afs.server_address
         self.assigned_tasks = {}   # 记录每个 worker 当前正在处理的任务
+
+        # { "worker_id": "address" }
+        self.workers = {}  
+        # { "worker_id": <gRPC_Stub> }
+        self.worker_stubs = {}
+        self.worker_regis_lock = threading.Lock()
         
         
         
@@ -32,8 +41,11 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
         
         # load tasks from AFS system
         self._load_tasks_from_afs()
-        
         print(f"[Coordinator] Loaded {self.total_tasks} tasks from AFS.")
+
+        # snapshot manager
+        self.snapshot_manager = CoordinatorSnapshotHandler(self)
+        self.snapshot_manager.start_snapshot_thread()
 
     # Handle the GetTask gRPC request. 
     def GetTask(self, request, context):
@@ -55,7 +67,7 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
 
 
     # Handle the SubmitResult gRPC request.
-    def SubmitResult(self, request, context):
+    def SubmitResult(self, request: messages.SubmitResultRequest, context):
 
         with self.primes_lock:
             self.all_primes.update(request.primes)
@@ -73,6 +85,26 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
 
         return messages.SubmitResultResponse(success=True)
     
+    # Handle the RegisterWorker gRPC request.
+    def RegisterWorkerId(self, request: snapshot_messages.RegisterWorkerIdRequest, context):
+        worker_id = request.worker_id
+        worker_address = request.worker_address
+        
+        with self.worker_regis_lock:
+            if worker_id not in self.workers:
+                print(f"[Coordinator] register new Worker: {worker_id} @ {worker_address}")
+                # Worker gRPC STUB
+                channel = grpc.insecure_channel(worker_address)
+                stub = snapshot_service.SnapshotServiceStub(channel)
+
+                # store Worker info
+                self.workers[worker_id] = worker_address
+                self.worker_stubs[worker_id] = stub
+            else:
+                print(f"[Coordinator] Worker {worker_id} re-registered.")
+                # (您可能還需要更新 channel 和 stub)
+
+        return snapshot_messages.RegisterWorkerIdResponse(success=True)
 
     # Called when a worker fails or times out (detected by heartbeat thread).
     # Reassigns the unfinished task back to the queue.
@@ -118,7 +150,7 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
         except Exception as e:
             print(f"[Coordinator] Error loading tasks from AFS: {e}")    
         
-def run_server():
+def run_coordinator_server():
     port = CONFIG.coordinator.port
     coordinator_servicer = CoordinatorServicer()
     coordinator_server = grpc.server(futures.ThreadPoolExecutor(max_workers=5))
@@ -136,7 +168,7 @@ def run_server():
         print("[Coordinator] All tasks processed. Press Ctrl+C to stop the server.")
         coordinator_server.wait_for_termination()
     except KeyboardInterrupt:
-        print("\n[Coordinator] Shutting down server...")
+        print("[Coordinator] Shutting down server...")
         
         if not coordinator_servicer.is_finished and coordinator_servicer.completed_tasks > 0:
             coordinator_servicer._save_results()
@@ -144,4 +176,4 @@ def run_server():
         coordinator_server.stop(0)
     
 if __name__ == '__main__':
-    run_server()
+    run_coordinator_server()

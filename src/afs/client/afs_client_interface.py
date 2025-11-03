@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-class IAFSCClient(ABC):
+class IAFSClient(ABC):
     """
     AFSClient 的抽象介面 (Interface)。
 

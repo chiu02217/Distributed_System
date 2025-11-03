@@ -33,11 +33,11 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         """
         Handle the OpenFile gRPC request.
         """
-        response = messages.OpenResponse()
+        response = messages.OpenFileResponse()
         
         try:
             file_path = self._get_file_path(request.filename)  ## fail check here
-            with open(file_path, 'r') as f:  # read file content
+            with open(file_path, 'rb') as f:  # read file content
                 response.content = f.read()
 
             with self.handle_lock:  # ensure thread safety
@@ -53,7 +53,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             response.error = str(e)
         return response
     
-    def Create(self, request, context):
+    def CreateFile(self, request, context):
         """
         Handle the CreateFile gRPC request.
         """
@@ -61,7 +61,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         
         try:
             file_path = self._get_file_path(request.filename)
-            with open(file_path, 'w') as f:  # create empty file
+            with open(file_path, 'wb') as f:  # create empty file
                 pass
 
             with self.handle_lock:  # ensure thread safety
@@ -91,7 +91,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             
             info = self.file_handles[handle]
             if request.modified and request.content:
-                with open(info['path'], 'w') as f:
+                with open(info['path'], 'wb') as f:
                     f.write(request.content)
                 print(f"[Server] Updated file: {info['filename']} with handle {handle}")
             
@@ -104,6 +104,70 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             response.error = str(e)
         return response
     
+    def ReadFile(self, request, context):
+        """
+        Handle the ReadFile gRPC request.
+        """
+        response = messages.ReadFileResponse()
+        
+        handle = request.handle
+        try:
+            if handle not in self.file_handles:
+                response.error = f"Invalid handle: {handle}"
+                return response
+            
+            info = self.file_handles[handle]
+            with open(info['path'], 'rb') as f:
+                response.content = f.read()
+            
+            print(f"[Server] Read file: {info['filename']} with handle {handle}")
+
+        except Exception as e:
+            response.error = str(e)
+        return response
+
+    def WriteFile(self, request, context):
+        """
+        Handle the WriteFile gRPC request.
+        """
+        response = messages.WriteFileResponse()
+        
+        handle = request.handle
+        try:
+            if handle not in self.file_handles:
+                response.error = f"Invalid handle: {handle}"
+                return response
+            
+            info = self.file_handles[handle]
+            with open(info['path'], 'wb') as f:
+                f.write(request.content)
+            
+            response.success = True
+            print(f"[Server] Wrote to file: {info['filename']} with handle {handle}")
+
+        except Exception as e:
+            response.error = str(e)
+        return response
+    
+    def ListFiles(self, request, context):
+        """
+        Handle the ListFiles gRPC request.
+        """
+        response = messages.ListFilesResponse()
+        
+        try:
+            input_files = os.listdir(self.input_dir)
+            filenames = [os.path.basename(f) for f in sorted(input_files)]
+            response.filenames.extend(filenames)
+            
+            print(f"[Server] ListFiles: found {len(filenames)} files.")
+            for filename in filenames:
+                print(f" - {filename}")
+        except Exception as e:
+            response.error = str(e)
+            print(f"[Server] Error listing files: {e}")
+        return response
+
 # start the server on port 8000
 def serve(input_dir = './data/server_storage/input', output_dir = './data/server_storage/output', port=8000):
     file_server = grpc.server(futures.ThreadPoolExecutor(max_workers=5)) # 5 threads for example

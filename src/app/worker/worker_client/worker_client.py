@@ -1,7 +1,6 @@
 import grpc
 import sys
 import threading  
-import json       
 import time       
 from src.common.prime_algo import PrimeAlgorithm
 from src.afs.afs_client.afs_client import AFSClient
@@ -38,6 +37,9 @@ class Worker(IWorker):
         # line number in current task 
         self.current_task_line = 0     
         self.worker_snapshot_handler = WorkerSnapshotHandler(self)
+        # heartbeat 
+        self.stop_heartbeat = threading.Event()
+        threading.Thread(target=self._send_heartbeat, daemon=True).start()
         # worker server
         self.grpc_server = worker_server.run_worker_server(
             trigger_snapshot_callback=self.worker_snapshot_handler.handle_snapshot
@@ -73,6 +75,8 @@ class Worker(IWorker):
             
             if not task.has_task:
                 print(f"[Worker {self.worker_id}] No more tasks available. Exiting.")
+                #stop heartbeat after tasks complete
+                self.stop_heartbeat.set()
                 break
             
             print(f"[Worker {self.worker_id}] Received task: {task.filename}")
@@ -90,6 +94,17 @@ class Worker(IWorker):
         self.grpc_server.stop(0)
 
             
+    def _send_heartbeat(self):
+        while not self.stop_heartbeat.is_set():
+            try:
+                self.coordinator_stub.Heartbeat(
+                    coordinator_messages.HeartbeatRequest(worker_id=self.worker_id)
+                )
+                print(f"[Worker {self.worker_id}] Sent heartbeat")
+            except grpc.RpcError as e:
+                print(f"[Worker {self.worker_id}] Heartbeat failed: {e}")
+            time.sleep(3)
+
     def _process_task(self, filename):
         file_handle = None
         

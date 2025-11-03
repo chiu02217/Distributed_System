@@ -5,4 +5,13 @@ import "coordinator_message.proto";
 service CoordinatorService {
     rpc GetTask (GetTaskRequest) returns (GetTaskResponse);
     rpc SubmitResult (SubmitResultRequest) returns (SubmitResultResponse);
+    rpc Heartbeat (HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+message HeartbeatRequest {
+    string worker_id = 1;
+}
+
+message HeartbeatResponse {
+    bool acknowledged = 1;
 }

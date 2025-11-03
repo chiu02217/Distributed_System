@@ -77,6 +77,7 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
 
 
     # Handle the SubmitResult gRPC request.
+    # completed_tasks in snapshot is needed as that properties will be used when restoring state
     def SubmitResult(self, request: coordinator_messages.SubmitResultRequest, context):
 
         with self.primes_lock:

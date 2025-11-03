@@ -17,7 +17,7 @@ class WorkerSnapshotHandler(IWorkerSnapshotHandler):
                 self.worker.current_snapshot_id = snapshot_id
                 # 呼叫 "unsafe" 版本，因為我們已經在鎖內部
                 self._save_worker_state_unsafe(snapshot_id) 
-
+    # save worker state to AFS
     def _save_worker_state_unsafe(self, snapshot_id):
 
         print(f"[Worker {self.worker.worker_id}] is saving snapshot {snapshot_id}...")

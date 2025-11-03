@@ -45,6 +45,7 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
                 "to_do_tasks": list(self.coordinator.task_queue.queue),
                 "in_progress_tasks": self.coordinator.assigned_tasks.copy(),
                 "total_tasks": self.coordinator.total_tasks,
+                # indeed need this
                 "completed_tasks": self.coordinator.completed_tasks,
             }
         # record primes which are found so far
@@ -78,9 +79,6 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
         worker_id = request.worker_id
         incoming_snapshot_id = getattr(request, "snapshot_id", None)
         filename = getattr(request, "filename", None)
-
-        if incoming_snapshot_id is None:
-            return
 
         # ensure a lock for snapshot_state exists
         if not hasattr(self, "_snapshot_lock"):

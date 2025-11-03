@@ -2,7 +2,7 @@ import grpc
 from concurrent import futures
 from src.common.grpc.auto_generated import snapshot_service_pb2_grpc as snapshot_service
 from src.common.grpc.auto_generated import snapshot_message_pb2 as messages
-from src.common.utils import CONFIG
+from src.common.config_loader import CONFIG
 
 # private
 class _SnapshotServicer(snapshot_service.SnapshotServiceServicer):

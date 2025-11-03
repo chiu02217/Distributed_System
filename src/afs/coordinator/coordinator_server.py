@@ -6,15 +6,15 @@ import os
 import sys
 from queue import Queue
 import threading
-from src.common.grpc.auto_generated import coordinator_message_pb2 as messages
-from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as service
+from src.common.grpc.auto_generated import coordinator_message_pb2 as coordinator_messages
+from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as coordinator_service
 from src.common.grpc.auto_generated import snapshot_service_pb2_grpc as snapshot_service
 from src.common.grpc.auto_generated import snapshot_message_pb2 as snapshot_messages
 from src.afs.coordinator.snapshot.coordinator_snapshot import CoordinatorSnapshotHandler
 from src.afs.afs_client.afs_client import AFSClient
-from src.common.utils import CONFIG
+from src.common.config_loader import CONFIG
 
-class CoordinatorServicer(service.CoordinatorServiceServicer):
+class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapshot_service.SnapshotServiceServicer):
     def __init__(self):
         self.task_queue = Queue()
         self.all_primes = set() # set store unique primes
@@ -50,7 +50,7 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
     # Handle the GetTask gRPC request. 
     def GetTask(self, request, context):
 
-        response = messages.GetTaskResponse()
+        response = coordinator_messages.GetTaskResponse()
         with self.task_lock:
             if self.task_queue.empty():
                 response.has_task = False
@@ -67,7 +67,7 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
 
 
     # Handle the SubmitResult gRPC request.
-    def SubmitResult(self, request: messages.SubmitResultRequest, context):
+    def SubmitResult(self, request: coordinator_messages.SubmitResultRequest, context):
 
         with self.primes_lock:
             self.all_primes.update(request.primes)
@@ -83,7 +83,7 @@ class CoordinatorServicer(service.CoordinatorServiceServicer):
                 print("[Coordinator] All tasks completed. Saving results...")
                 self._save_results()
 
-        return messages.SubmitResultResponse(success=True)
+        return coordinator_messages.SubmitResultResponse(success=True)
     
     # Handle the RegisterWorker gRPC request.
     def RegisterWorkerId(self, request: snapshot_messages.RegisterWorkerIdRequest, context):
@@ -154,7 +154,10 @@ def run_coordinator_server():
     port = CONFIG.coordinator.port
     coordinator_servicer = CoordinatorServicer()
     coordinator_server = grpc.server(futures.ThreadPoolExecutor(max_workers=5))
-    service.add_CoordinatorServiceServicer_to_server(
+    coordinator_service.add_CoordinatorServiceServicer_to_server(
+        coordinator_servicer, coordinator_server
+    )
+    snapshot_service.add_SnapshotServiceServicer_to_server(
         coordinator_servicer, coordinator_server
     )
     coordinator_server.add_insecure_port(f'[::]:{port}')

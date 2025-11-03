@@ -5,34 +5,29 @@ import sys
 import threading
 from src.common.grpc.auto_generated import file_operation_message_pb2 as messages
 from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as service
+from src.common.config_loader import CONFIG
 
 # service implementation, use the file_operation_service_pb2_grpc.py file
 class FileOperationServiceServicer(service.FileOperationServiceServicer):
     def __init__(self, input_dir, output_dir):
-        """
-        Initialize the FileOperationServiceServicer with an input directory.
-        Args:
-            input_dir (str): The directory where files are stored.
-            output_dir (str): The directory where output files will be saved.
-        """
+        # input and output directories
         self.input_dir = input_dir
         self.output_dir = output_dir
-        
-        self.file_handles = {} # {handle: {'filename', 'path', 'file_obj', 'mode'}}
+        # {handle: {'filename', 'path', 'file_obj', 'mode'}}
+        self.file_handles = {} 
         self.next_handle = 1
-        self.handle_lock = threading.Lock()  # to ensure thread safety
+        self.handle_lock = threading.Lock() 
         
         print(f"Server initialized: input_dir={self.input_dir}, output_dir={self.output_dir}")
 
-    def _get_file_path(self, filename):
+    # get full file path
+    def _get_file_path(self, filename:str) -> str:
         if filename.startswith("input_dataset_"):
             return os.path.join(self.input_dir, filename)
         return os.path.join(self.output_dir, filename)
 
-    def OpenFile(self, request, context):
-        """
-        Handle the OpenFile gRPC request.
-        """
+    # Open File request
+    def OpenFile(self, request: messages.OpenFileRequest, context: grpc.ServicerContext):
         response = messages.OpenFileResponse()
         
         try:
@@ -53,10 +48,8 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             response.error = str(e)
         return response
     
+    # Create File request
     def CreateFile(self, request, context):
-        """
-        Handle the CreateFile gRPC request.
-        """
         response = messages.CreateFileResponse()
         
         try:
@@ -76,11 +69,9 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         except Exception as e:
             response.error = str(e)
         return response
-    
-    def CloseFile(self, request, context):
-        """
-        Handle the CloseFile gRPC request.
-        """
+
+    # Close File request
+    def CloseFile(self, request: messages.CloseFileRequest, context: grpc.ServicerContext):
         response = messages.CloseFileResponse()
         
         handle = request.handle
@@ -103,11 +94,9 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         except Exception as e:
             response.error = str(e)
         return response
-    
-    def ReadFile(self, request, context):
-        """
-        Handle the ReadFile gRPC request.
-        """
+
+    # Read File request
+    def ReadFile(self, request: messages.ReadFileRequest, context: grpc.ServicerContext):
         response = messages.ReadFileResponse()
         
         handle = request.handle
@@ -120,16 +109,15 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             with open(info['path'], 'rb') as f:
                 response.content = f.read()
             
-            print(f"[Server] Read file: {info['filename']} with handle {handle}")
+            print(f"[Afs Server] Read file: {info['filename']} with handle {handle}")
 
         except Exception as e:
             response.error = str(e)
         return response
 
-    def WriteFile(self, request, context):
-        """
-        Handle the WriteFile gRPC request.
-        """
+    # Write File request
+    def WriteFile(self, request: messages.WriteFileRequest, context: grpc.ServicerContext):
+
         response = messages.WriteFileResponse()
         
         handle = request.handle
@@ -143,16 +131,14 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
                 f.write(request.content)
             
             response.success = True
-            print(f"[Server] Wrote to file: {info['filename']} with handle {handle}")
+            print(f"[AfsServer] Wrote to file: {info['filename']} with handle {handle}")
 
         except Exception as e:
             response.error = str(e)
         return response
-    
-    def ListFiles(self, request, context):
-        """
-        Handle the ListFiles gRPC request.
-        """
+
+    # List Files request
+    def ListFiles(self, request: messages.ListFilesRequest, context: grpc.ServicerContext):
         response = messages.ListFilesResponse()
         
         try:
@@ -160,17 +146,21 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             filenames = [os.path.basename(f) for f in sorted(input_files)]
             response.filenames.extend(filenames)
             
-            print(f"[Server] ListFiles: found {len(filenames)} files.")
+            print(f"[Afs Server] ListFiles: found {len(filenames)} files.")
             for filename in filenames:
                 print(f" - {filename}")
         except Exception as e:
             response.error = str(e)
-            print(f"[Server] Error listing files: {e}")
+            print(f"[Afs Server] Error listing files: {e}")
         return response
 
 # start the server on port 8000
-def serve(input_dir = './data/server_storage/input', output_dir = './data/server_storage/output', port=8000):
-    file_server = grpc.server(futures.ThreadPoolExecutor(max_workers=5)) # 5 threads for example
+def start_afs_server():
+    port = CONFIG.afs.port
+    input_dir = CONFIG.afs.input_dir
+    output_dir = CONFIG.afs.output_dir
+    max_workers = CONFIG.afs.can_handle_max_workers
+    file_server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
     service.add_FileOperationServiceServicer_to_server(
         FileOperationServiceServicer(input_dir, output_dir), file_server
     )
@@ -180,8 +170,5 @@ def serve(input_dir = './data/server_storage/input', output_dir = './data/server
     file_server.wait_for_termination()
 
 if __name__ == '__main__':
-    serve(
-        input_dir = sys.argv[1] if len(sys.argv) > 1 else './data/server_storage/input',
-        output_dir = sys.argv[2] if len(sys.argv) > 2 else './data/server_storage/output',
-        port = int(sys.argv[3]) if len(sys.argv) > 3 else 8000
-    )
+    start_afs_server()
+    

@@ -19,7 +19,7 @@ sys.path.append(project_root)
 
 try:
     from src.app.worker.worker_server.worker_server import run_worker_server
-    from src.common.utils import CONFIG
+    from src.common.config_loader import CONFIG
 except ImportError as e:
     print(f"--- ImportError ---")
 

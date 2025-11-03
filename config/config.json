@@ -6,8 +6,12 @@
         },
     "afs":
         {
+            "can_handle_max_workers": 5,
             "afs_temp_path": "/afs/temp",
-            "server_address": "localhost:8000"
+            "server_address": "localhost:8000",
+            "port": 8000,
+            "input_dir": "./data/server_storage/input",
+            "output_dir": "./data/server_storage/output"
         },
     "coordinator":
         {

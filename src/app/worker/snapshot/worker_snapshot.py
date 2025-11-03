@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from src.app.worker.worker_client.worker_client import Worker 
 
 class WorkerSnapshotHandler(IWorkerSnapshotHandler):
-    def __init__(self, worker_instance: Worker):
+    def __init__(self, worker_instance: 'Worker'):
         self.worker = worker_instance
 
     def handle_snapshot(self, snapshot_id):

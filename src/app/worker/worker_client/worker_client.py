@@ -11,7 +11,7 @@ from src.common.grpc.auto_generated import coordinator_message_pb2 as coordinato
 from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as coordinator_service
 from src.common.grpc.auto_generated import snapshot_message_pb2 as snapshot_messages
 from src.common.grpc.auto_generated import snapshot_service_pb2_grpc as snapshot_service
-from src.common.utils import CONFIG
+from src.common.config_loader import CONFIG
 from src.app.worker.worker_server import worker_server
 
     

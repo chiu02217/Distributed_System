@@ -9,3 +9,4 @@ desktop.ini
 .vscode/
 .venv/
 .idea/
+data/server_storage/output/*.json

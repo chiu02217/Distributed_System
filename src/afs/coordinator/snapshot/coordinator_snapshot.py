@@ -22,7 +22,7 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
 
     # backeground thread(trigger snapshot periodically)
     def start_snapshot_thread(self):
-        print("[SnapshotManager] Starting snapshot thread...")
+        print("[Snapshot] Starting snapshot thread...")
         thread = threading.Thread(target=self.snapshot_loop, daemon=True)
         thread.start()
 
@@ -53,7 +53,7 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
 
         # store so far state to AFS in json format
         state_filename = f"snapshot_{snapshot_id}.json"
-        self._save_state_to_afs(state_filename, coord_state)
+        self.save_state_to_afs(state_filename, coord_state)
         
         # get worker list
         workers = self.get_all_worker_ids()
@@ -62,9 +62,9 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
             "channels_to_record": workers.copy(),
             "channel_messages": {worker_id: [] for worker_id in workers}
         }
-        
-        # 已發送給所有 Worker (在下次 GetTask 時)
-        print(f"[SnapshotManager] Coordinator state saved for snapshot {snapshot_id}.")
+
+        # already sent to all Worker (在下次 GetTask 時)
+        print(f"[Snapshot] Coordinator state saved for snapshot {snapshot_id}.")
 
     # send snapshot_id to worker
     def send_snapshot_id_to_worker(self, response: messages.GetTaskResponse):
@@ -96,16 +96,16 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
             # Receiver rule: first marker from this worker for this snapshot
             if worker_id in state_data.get("channels_to_record", []):
                 state_data["channels_to_record"].remove(worker_id)
-                print(f"[SnapshotManager] Received marker {incoming_snapshot_id} from {worker_id}. Stopping channel recording.")
+                print(f"[Snapshot] Received snapshot {incoming_snapshot_id} from {worker_id}.")
 
                 # persist recorded in-flight messages for this channel
                 msgs = state_data.get("channel_messages", {}).get(worker_id, [])
-                channel_filename = f"snapshot_channel_W-C_{worker_id}_{incoming_snapshot_id}.json"
+                channel_filename = f"snapshot_channel_{worker_id}_{incoming_snapshot_id}.json"
                 self.save_state_to_afs(channel_filename, msgs)
 
                 # if all channels done, finalize snapshot
                 if not state_data.get("channels_to_record"):
-                    print(f"[SnapshotManager] --- Global Snapshot {incoming_snapshot_id} COMPLETED ---")
+                    print(f"[Snapshot] Global Snapshot {incoming_snapshot_id} COMPLETED ---")
                     # remove snapshot entry
                     del self.snapshot_state[incoming_snapshot_id]
 
@@ -120,7 +120,7 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
                 # indicates this message should be considered in-flight, append it.
                 # (Keeps original comparison logic: incoming_snapshot_id < snapshot_id)
                 if worker_id in data.get("channels_to_record", []) and incoming_snapshot_id < snapshot_id:
-                    print(f"[SnapshotManager] Recording in-flight message from {worker_id} for snapshot {snapshot_id}")
+                    print(f"[Snapshot] Recording in-flight message from {worker_id} for snapshot {snapshot_id}")
                     if filename is not None:
                         data["channel_messages"][worker_id].append(filename)
 
@@ -128,20 +128,20 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
     def save_state_to_afs(self, filename, state_data):
         handle = self.afs_client.create_file(filename)
         if handle is None:
-            print(f"[SnapshotManager] AFS Error: Could not create snapshot file {filename}")
+            print(f"[Snapshot] AFS Error: Could not create snapshot file {filename}")
             return
 
         try:
             data_str = json.dumps(state_data, indent=2)
-            # 分塊寫入，以防資料太大
+            # write in chunks if too large
             for i in range(0, len(data_str), 1024):
                 chunk = data_str[i:i+1024]
                 self.afs_client.write_file(handle, chunk)
         except Exception as e:
-            print(f"[SnapshotManager] Error writing snapshot data: {e}")
+            print(f"[Snapshot] Error writing snapshot data: {e}")
         finally:
             self.afs_client.close_file(handle)
-            print(f"[SnapshotManager] Saved state to {filename}")
+            print(f"[Snapshot] Saved state to {filename}")
             
 
     # get all registered worker ids        

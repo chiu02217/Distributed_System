@@ -6,16 +6,26 @@ package fileoperation;
 
 message OpenFileRequest {
   string filename = 1;
+  string request_id =2;
 }
 
 message OpenFileResponse {
   int32 handle = 1;
-  bytes content = 2;
-  string error = 3;
+  string error = 2;
+}
+
+message ReadFileRequest {
+    int32 handle = 1;
+}
+
+message ReadFileResponse {
+    bytes content = 1;
+    string error = 2;
 }
 
 message CreateFileRequest {
   string filename = 1;
+  string request_id = 2;
 } 
 
 message CreateFileResponse {
@@ -24,9 +34,10 @@ message CreateFileResponse {
 }
 
 message CloseFileRequest {
-  int32 handle =1;
+  int32 handle = 1;
   bool modified = 2;
   bytes content = 3;
+  string request_id = 4;
 }
 
 message CloseFileResponse {
@@ -34,18 +45,10 @@ message CloseFileResponse {
   string error = 2;
 }
 
-message ReadFileRequest {
-    string filename = 1;
-}
-
-message ReadFileResponse {
-    bool success = 1;
-    string error_message = 2;
-    FileContent file = 3;
-}
-
 message WriteFileRequest {
-    FileContent file = 1;
+    int32 handle = 1;
+    bytes content = 2;
+    string request_id = 3;
 }
 
 message WriteFileResponse {

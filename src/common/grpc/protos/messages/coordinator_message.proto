@@ -7,7 +7,7 @@ message GetTaskRequest {
 message GetTaskResponse {
     string filename = 1;
     bool has_task = 2;
-    int32 remaining = 3;
+    bool is_resume = 3;
     int32 snapshot_id = 4;
 }
 
@@ -20,4 +20,12 @@ message SubmitResultRequest {
 
 message SubmitResultResponse {
     bool success = 1;
+}
+
+message HeartbeatRequest{
+    string worker_id = 1;
+}
+
+message HeartbeatResponse{
+    bool acknowledged = 1;
 }

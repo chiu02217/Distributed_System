@@ -101,13 +101,13 @@ python -m src.afs.worker.worker [worker_id] [coordinator_address] [file_server_a
 
 Example code for quick start: (must in separate terminal!)
 ```
-python -m src.afs.server.server
+python -m src.afs_server.afs_server
 
-python -m src.afs.coordinator.coordinator
+python -m src.afs_coordinator.coordinator
 
-python -m src.afs.worker.worker worker-1
-python -m src.afs.worker.worker worker-2
-python -m src.afs.worker.worker worker-3
+python -m src.worker.worker_client.worker_client worker-1
+python -m src.worker.worker_client.worker_client worker-2
+python -m src.worker.worker_client.worker_client worker-3
 ```
 ## System Architecture
 The AFS system follows a distributed computing pattern with the following components:

@@ -269,12 +269,20 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
                     print(f"[Coordinator] Error closing file {filename} in AFS: {close_response.error if close_response else 'No response'}")
                 else:
                     print(f"[Coordinator] Closed file {filename} in AFS.")
+
+                    
        
     def Heartbeat(self, request, context):
         worker_id = request.worker_id
-        self.last_heartbeat[worker_id] = time.time()
+        
+        with self.heartbeat_lock:
+            self.last_heartbeat[worker_id] = time.time()
+        
         print(f"[Coordinator] Heartbeat received from {worker_id}")
-        return coordinator_service_pb2.HeartbeatResponse(acknowledged=True) 
+
+        response = coordinator_messages.HeartbeatResponse()
+        response.acknowledged = True
+        return response
     
     def _monitor_heartbeats(self):
         # might have to change the while loop

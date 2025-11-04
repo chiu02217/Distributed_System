@@ -90,13 +90,22 @@ Start each component in a separate terminal:
 ```
 # Terminal 1: Start AFS Server
 python -m src.afs.server.server [input_dir] [output_dir] [port]
+or
+python src/afs/server/afs_server.py
+(depend on your pc settings)
+
 
 # Terminal 2: Start Coordinator
 python -m src.afs.coordinator.coordinator [input_dir] [afs_server_address] [port]
+or
+python src/afs/coordinator/coordinator_server.py
+(depend on your pc settings)
 
 # Terminal 3-5: Start Workers
-python -m src.afs.worker.worker [worker_id] [coordinator_address] [file_server_address] [cache_dir]
-
+python -m src.app.worker.worker_client.worker_client [worker_id] [coordinator_address] [file_server_address] [cache_dir]
+or (example)
+python src/app/worker/worker_client/worker_client.py  worker-1
+(depend on your pc settings)
 ```
 
 Example code for quick start: (must in separate terminal!)

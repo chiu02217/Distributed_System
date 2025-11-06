@@ -7,16 +7,16 @@ from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as se
 from src.common.config_loader import CONFIG
 
 class AFSClient(IAFSClient):
-    def __init__(self, server_address=CONFIG.afs.server_address, cache_dir=CONFIG.afs.afs_temp_path):
+    def __init__(self, channel: grpc.Channel, cache_dir=CONFIG.afs.afs_temp_path):
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
         
-        self.channel = grpc.insecure_channel(server_address)
+        self.channel = channel
         self.stub = service.FileOperationServiceStub(self.channel)
         
         self.open_files = {}
-        print(f"Connected to server at {server_address}, cache dir: {self.cache_dir}")
-        
+        print(f"Connected to server, cache dir: {self.cache_dir}")
+
     # open a file from AFS server, return handle
     def open_file(self, filename: str):
         try:
@@ -160,7 +160,7 @@ class AFSClient(IAFSClient):
     def mark_modified(self, handle):
         if handle in self.open_files:
             self.open_files[handle]['modified'] = True
-            
+    # TODO: can specify directory
     def list_files(self):
         try:
             request = messages.ListFilesRequest()
@@ -175,3 +175,55 @@ class AFSClient(IAFSClient):
         except Exception as e:
             print(f"Exception during list_files: {e}")
             return []
+        
+    # find the latest coordinator snapshot file
+    # TODO: input directory parameter
+    def find_latest_coordinator_snapshot(self, input_dir="snapshots"):
+        print("finding latest coordinator snapshot...")
+        try:
+            # use existing list_files method to get snapshot files
+            all_files = self.list_files()
+            if all_files is None:
+                print("Error: list_files() failed")
+                return None
+
+            snapshot_files = []
+            
+            #  according to naming convention "snapshot_<ID>.json"
+            for f in all_files:
+                match = re.match(r'^snapshot_(\d+)\.json$', f)
+                if match:
+                    snapshot_id = int(match.group(1))
+                    snapshot_files.append((snapshot_id, f))
+            
+            if not snapshot_files:
+                print("Error: No coordinator snapshots found.")
+                return None
+                
+            # 3. NUM sort files by snapshot_id in descending order
+            snapshot_files.sort(key=lambda x: x[0], reverse=True)
+            
+            latest_file = snapshot_files[0][1] 
+            print(f"find {latest_file}")
+            return latest_file
+
+        except Exception as e:
+            print(f"Error: {e}")
+            return None
+    # read json file (for snapshot)
+    def read_json_file(self, handle):
+        if handle not in self.open_files:
+            print(f"[AFS] Error: Invalid file handle for read_entire_file: {handle}")
+            return None
+
+        file_info = self.open_files[handle]
+        
+        try:
+            # Reset file pointer to the beginning
+            file_info['file_obj'].seek(0)
+            content = file_info['file_obj'].read()
+            return content
+            
+        except Exception as e:
+            print(f"[AFS] Error reading entire file from cache: {e}")
+            return None

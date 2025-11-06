@@ -10,3 +10,4 @@ desktop.ini
 .venv/
 .idea/
 data/server_storage/output/*.json
+data/server_storage/input/input_dataset_biggest.txt

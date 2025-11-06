@@ -16,6 +16,7 @@ from src.common.config_loader import CONFIG
 from src.common.grpc.auto_generated import coordinator_message_pb2 as messages
 from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as service
 from src.common.grpc.auto_generated import coordinator_service_pb2
+import json
 
 
 class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapshot_service.SnapshotServiceServicer):
@@ -32,29 +33,40 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         # { "worker_id": <gRPC_Stub> }
         self.worker_stubs = {}
         self.worker_regis_lock = threading.Lock()
-        
-        
-        
-        print(f"[Coordinator] Connecting to AFS at {afs_server_address}...")
-        self.afs_client = AFSClient(server_address=afs_server_address)
-        
+        #heartbeat logs
+        self.last_heartbeat = {}
+        self.timeout_threshold = 10  # seconds
         # task management
         self.total_tasks = 0
         self.completed_tasks = 0
         self.is_finished = False
-        
-        # load tasks from AFS system
-        self._load_tasks_from_afs()
+        # higher cache size for grpc
+        grpc_options = [
+            ('grpc.max_receive_message_length', 100 * 1024 * 1024),
+            ('grpc.max_send_message_length', 100 * 1024 * 1024)  
+        ]
+        afs_channel = grpc.insecure_channel(afs_server_address, options=grpc_options)
+        self.afs_client = AFSClient(channel=afs_channel)
+        print(f"[Coordinator] Connecting to AFS at {afs_server_address}...")
+        # snapshot manager
+        self.snapshot_manager = CoordinatorSnapshotHandler(self)
+        # check for existing snapshots and recover state if found
+        recovered = self.snapshot_manager.recover_from_snapshot()
 
-        #heartbeat logs
-        self.last_heartbeat = {}
-        self.timeout_threshold = 10  # seconds
+        # Use the NEW __init__ signature: AFSClient(channel=..., cache_dir=...)
+
+        
+        
+        # only load tasks if no snapshot recovered
+        if not recovered:
+            print("[Coordinator] No snapshot found. Starting fresh.")
+            self._load_tasks_from_afs()
+            #print(f"[Coordinator] Loaded {self.total_tasks} tasks (Completed: {self.completed_tasks}).")
+
         threading.Thread(target=self._monitor_heartbeats, daemon=True).start()
         
         print(f"[Coordinator] Loaded {self.total_tasks} tasks from AFS.")
 
-        # snapshot manager
-        self.snapshot_manager = CoordinatorSnapshotHandler(self)
         self.snapshot_manager.start_snapshot_thread()
 
     # Handle the GetTask gRPC request. 

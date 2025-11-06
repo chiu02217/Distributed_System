@@ -17,7 +17,7 @@ class _SnapshotServicer(snapshot_service.SnapshotServiceServicer):
         
         return messages.TriggerSnapshotResponse(success=True)
 
-def run_worker_server(trigger_snapshot_callback, port=CONFIG.worker.worker_snapshot_port, max_workers=CONFIG.worker.worker_snapshot_max_workers):
+def run_worker_server(trigger_snapshot_callback, port: int, max_workers: int = CONFIG.worker.worker_snapshot_max_workers):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
     servicer = _SnapshotServicer(trigger_snapshot_callback)
     snapshot_service.add_SnapshotServiceServicer_to_server(servicer, server)

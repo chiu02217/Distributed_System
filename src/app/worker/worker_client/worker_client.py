@@ -20,6 +20,11 @@ class Worker(IWorker):
     def __init__(self, worker_id, worker_port):
         self.worker_id = worker_id
         self.worker_port = worker_port 
+        # grpc cache size 100MB
+        grpc_options = [
+            ('grpc.max_receive_message_length', 100 * 1024 * 1024),
+            ('grpc.max_send_message_length', 100 * 1024 * 1024)
+        ]
         
         coordinator_address = CONFIG.coordinator.coordinator_address
         file_server_address = CONFIG.afs.server_address
@@ -27,10 +32,11 @@ class Worker(IWorker):
         cache_dir = f"{CONFIG.afs.afs_temp_path}/{worker_id}" 
         # debug
         print(f"[Worker {self.worker_id}] Coordinator: {coordinator_address}, AFS: {file_server_address}")
-        common_channel = grpc.insecure_channel(coordinator_address)
+        common_channel = grpc.insecure_channel(coordinator_address, options=grpc_options)
+        afs_channel = grpc.insecure_channel(file_server_address, options=grpc_options)
         self.coordinator_stub = coordinator_service.CoordinatorServiceStub(common_channel)
         self.snapshot_stub = snapshot_service.SnapshotServiceStub(common_channel)
-        self.afs_client = AFSClient(server_address=file_server_address, cache_dir=cache_dir)
+        self.afs_client = AFSClient(cache_dir=cache_dir, channel=afs_channel)
         # snapshot need
         self.state_lock = threading.Lock() 
         self.current_snapshot_id = 0
@@ -44,24 +50,28 @@ class Worker(IWorker):
         threading.Thread(target=self._send_heartbeat, daemon=True).start()
         # worker server
         self.grpc_server = worker_server.run_worker_server(
-            trigger_snapshot_callback=self.worker_snapshot_handler.handle_snapshot
+            trigger_snapshot_callback=self.worker_snapshot_handler.handle_snapshot,
+            port=self.worker_port,
         )
     
     def run_task(self):
         print(f"[Worker {self.worker_id}] Started!")
+        # register to coordinator
+        registered_successfully = False
         # first register itself Id to coordinator
-        try:
-            # tell Coordinator how to call back
-            register_req = snapshot_messages.RegisterWorkerIdRequest(
-                worker_id=self.worker_id,
-                worker_address=f"localhost:{self.worker_port}"
-            )
-            self.snapshot_stub.RegisterWorkerId(register_req)
-            print(f"[Worker {self.worker_id}] register to coordinator success.")
-        except grpc.RpcError as e:
-            print(f"[Worker {self.worker_id}] register to coordinator error:  {e}")
-            self.grpc_server.stop(0)
-            return
+        while not registered_successfully:
+             try:
+                register_req = snapshot_messages.RegisterWorkerIdRequest(
+                    worker_id=self.worker_id,
+                    worker_address=f"localhost:{self.worker_port}"
+                )
+                self.snapshot_stub.RegisterWorkerId(register_req)
+                registered_successfully = True
+                print(f"[Worker {self.worker_id}] register to coordinator success.")
+             except grpc.RpcError as e:
+                print(f"[Worker {self.worker_id}] register to coordinator error:  {e}")
+                # retry
+                time.sleep(2)
         # request new task from coordinator
         while True:
             try: 
@@ -70,7 +80,7 @@ class Worker(IWorker):
                 )
             except grpc.RpcError as e:
                 print(f"[Worker {self.worker_id}] gRPC error while getting task: {e}")
-                break
+                continue
 
             if task.snapshot_id > 0:
                 self.worker_snapshot_handler.handle_snapshot(task.snapshot_id)
@@ -132,6 +142,8 @@ class Worker(IWorker):
                     self.current_task_line += 1
                 
                 line_counter += 1
+                # for test slow processing
+                time.sleep(0.01)
                 
                 try:
                     n = int(number_str)

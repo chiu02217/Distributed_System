@@ -16,15 +16,22 @@ class _ConfigLoader:
 
 
     def load_config(config_path='config/config.json'):
+        # 取得目前檔案的絕對路徑
+        current_file_path = os.path.abspath(__file__)
+        common_dir = os.path.dirname(current_file_path)
+        src_dir = os.path.dirname(common_dir)
+        project_root = os.path.dirname(src_dir)
+        config_path = os.path.join(project_root, 'config', 'config.json')
+
         if not os.path.exists(config_path):
-            print(f"error: config file not found: {config_path}")
+            print(f"error: cannot find config file: {config_path}")
             sys.exit(1)
             
         with open(config_path, 'r') as f:
             try:
                 return json.load(f)
             except json.JSONDecodeError:
-                print(f"{config_path} format not correct。")
+                print(f"error: invalid JSON format in config file: {config_path}")
                 sys.exit(1)
 
 _loaded_config_dict = _ConfigLoader.load_config()

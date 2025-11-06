@@ -21,3 +21,7 @@ class ICoordinatorSnapshotHandler(ABC):
     @abstractmethod
     def send_snapshot_id_to_worker(self, response):
         pass
+
+    @abstractmethod
+    def recover_from_snapshot(self):
+        pass

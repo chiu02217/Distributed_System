@@ -7,6 +7,9 @@ from src.common.grpc.auto_generated import file_operation_message_pb2 as message
 from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as service
 from src.common.config_loader import CONFIG
 
+# for test relative path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 # service implementation, use the file_operation_service_pb2_grpc.py file
 class FileOperationServiceServicer(service.FileOperationServiceServicer):
     def __init__(self, input_dir, output_dir):
@@ -160,9 +163,11 @@ def start_afs_server():
     input_dir = CONFIG.afs.input_dir
     output_dir = CONFIG.afs.output_dir
     max_workers = CONFIG.afs.can_handle_max_workers
+    abs_input_dir = os.path.join(PROJECT_ROOT, input_dir)
+    abs_output_dir = os.path.join(PROJECT_ROOT, output_dir)
     file_server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
     service.add_FileOperationServiceServicer_to_server(
-        FileOperationServiceServicer(input_dir, output_dir), file_server
+        FileOperationServiceServicer(input_dir=abs_input_dir, output_dir=abs_output_dir), file_server
     )
     file_server.add_insecure_port(f'[::]:{port}')
     print(f"[Server] starts on port {port}")

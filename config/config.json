@@ -11,6 +11,7 @@
             "server_address": "localhost:8000",
             "port": 8000,
             "input_dir": "./data/server_storage/input",
+            "snapshot_dir": "./data/server_storage/snapshots",
             "output_dir": "./data/server_storage/output"
         },
     "coordinator":

@@ -146,3 +146,49 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
     def get_all_worker_ids(self):
         with self.coordinator.worker_regis_lock:
             return set(self.coordinator.workers.keys())
+        
+
+    # recover from snapshot at startup
+    def recover_from_snapshot(self):
+        print("[Coordinator] Checking for existing coordinator snapshots...")
+        try:
+            # Find the latest coordinator snapshot file in AFS.
+            latest_snapshot_file = self.afs_client.find_latest_coordinator_snapshot()
+            # if no snapshot file
+            if latest_snapshot_file is None:
+                print("[Coordinator] No existing snapshot found.")
+                return False
+            print(f"[Coordinator] Found snapshot '{latest_snapshot_file}'. Recovering state...")
+
+            # Read the snapshot file from AFS.
+            handle = self.afs_client.open_file(latest_snapshot_file)
+            state_data = self.afs_client.read_json_file(handle)
+            self.afs_client.close_file(handle)
+            state = json.loads(state_data)
+
+            # Restore task-related state.
+            with self.coordinator.task_lock:
+                for task in state.get("to_do_tasks", []):
+                    self.coordinator.task_queue.put(task)
+
+                # Any in-progress tasks should be re-queued so workers can pick them up.
+                self.coordinator.assigned_tasks = state.get("in_progress_tasks", {})
+                for task in self.coordinator.assigned_tasks.values():
+                    self.coordinator.task_queue.put(task)
+                # Restore counters.
+                self.coordinator.total_tasks = state.get("total_tasks", 0)
+                self.coordinator.completed_tasks = state.get("completed_tasks", 0)
+
+                # Clear assigned_tasks because they were re-queued for reassignment.
+                self.coordinator.assigned_tasks = {}
+
+            # Restore temporary primes set.
+            with self.coordinator.primes_lock:
+                self.coordinator.all_primes = set(state.get("temp_primes", []))
+
+            print("[Coordinator] State recovery complete.")
+            return True
+
+        except Exception as e:
+            print(f"[Coordinator] Failed to load snapshot: {e}. Starting fresh.")
+            return False

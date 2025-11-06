@@ -85,3 +85,36 @@ class IAFSClient(ABC):
             bool: Whether the close/upload was successful.
         """
         pass
+
+    @abstractmethod
+    def list_files(self):
+        """
+        List all files stored on the AFS server.
+
+        Returns:
+            list: A list of filenames.
+        """
+        pass
+
+    @abstractmethod
+    def find_latest_coordinator_snapshot(self, input_dir):
+        """
+        Find the latest coordinator snapshot file in AFS.
+
+        Returns:
+            str: The filename of the latest snapshot, or None if not found.
+        """
+        pass
+
+    @abstractmethod
+    def read_json_file(self, handle):
+        """
+        Read the entire content of a JSON file from AFS.
+
+        Args:
+            handle: The handle of the JSON file to read.
+
+        Returns:
+            dict: The content of the JSON file, or None if not found.
+        """
+        pass

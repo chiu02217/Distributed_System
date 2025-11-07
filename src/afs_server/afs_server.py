@@ -6,6 +6,7 @@ import threading
 from src.common.grpc.auto_generated import file_operation_message_pb2 as messages
 from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as service
 from src.common.config_loader import CONFIG
+import argparse
 
 class FileOperationServiceServicer(service.FileOperationServiceServicer):
     def __init__(self, input_dir, output_dir):
@@ -234,5 +235,15 @@ def start_afs_server():
     file_server.wait_for_termination()
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Start AFS file server")
+    parser.add_argument("--input", type=str, help="Path to input dir")
+    parser.add_argument("--output", type=str, help="Path to output dir")
+    args = parser.parse_args()
+
+    # Override CONFIG if flags are provided
+    if args.input:
+        CONFIG.afs.input_dir = args.input
+    if args.output:
+        CONFIG.afs.output_dir = args.output
     start_afs_server()
     

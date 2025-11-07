@@ -54,7 +54,7 @@ class Worker(IWorker):
         
         # snapshot server
         self.grpc_server = worker_server.run_worker_server(
-            trigger_snapshot_callback=self.worker_snapshot_handler.handle_snapshot
+            trigger_snapshot_callback=self.worker_snapshot_handler.handle_snapshot, port=self.worker_port
         )
     
     def run_task(self):

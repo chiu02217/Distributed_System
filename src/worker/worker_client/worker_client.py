@@ -66,19 +66,21 @@ class Worker(IWorker):
         3. Otherwise, pull new task file and process to find prime numbers.
         """
         print(f"[Worker {self.worker_id}] Started!")
-        # first register itself Id to coordinator
-        try:
-            # tell Coordinator how to call back
-            register_req = snapshot_messages.RegisterWorkerIdRequest(
-                worker_id=self.worker_id,
-                worker_address=f"localhost:{self.worker_port}"
-            )
-            self.snapshot_stub.RegisterWorkerId(register_req)
-            print(f"[Worker {self.worker_id}] register to coordinator success.")
-        except grpc.RpcError as e:
-            print(f"[Worker {self.worker_id}] register to coordinator error:  {e}")
-            self.grpc_server.stop(0)
-            return
+        # first register itself Id to coordinator - keeps trying until success
+        while True:
+            try:
+                # tell Coordinator how to call back
+                register_req = snapshot_messages.RegisterWorkerIdRequest(
+                    worker_id=self.worker_id,
+                    worker_address=f"localhost:{self.worker_port}"
+                )
+                self.snapshot_stub.RegisterWorkerId(register_req)
+                print(f"[Worker {self.worker_id}] register to coordinator success.")
+                break
+            except grpc.RpcError as e:
+                print(f"[Worker {self.worker_id}] register to coordinator error:  {e}")
+                self.grpc_server.stop(0)
+                return
         # request new task from coordinator
         while True:
             try: 

@@ -14,7 +14,7 @@ from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as coord
 from src.common.grpc.auto_generated import snapshot_message_pb2 as snapshot_messages
 from src.common.grpc.auto_generated import snapshot_service_pb2_grpc as snapshot_service
 from src.common.config_loader import CONFIG
-from src.app.worker.worker_server import worker_server
+from src.worker.worker_server import worker_server
 from src.common.grpc.auto_generated import coordinator_service_pb2
 
     
@@ -23,19 +23,23 @@ class Worker(IWorker):
         self.worker_id = worker_id
         self.worker_port = worker_port 
         
-        # Connect to Coordinator
         coordinator_address = CONFIG.coordinator.coordinator_address
         print(f"[Worker {self.worker_id}] Connecting to Coordinator at {coordinator_address}...")
         coordinator_channel = grpc.insecure_channel(coordinator_address)
         self.coordinator_stub = coordinator_service.CoordinatorServiceStub(coordinator_channel)
 
-        # Connect to AFS
-        file_server_address = CONFIG.afs.server_address
-        print(f"[Worker {self.worker_id}] Connecting to AFS at {file_server_address}...")
-        file_channel = grpc.insecure_channel(file_server_address)
-        self.afs_stub = afs_service.FileOperationServiceStub(file_channel)
+        base_afs_port = CONFIG.afs.port
+        self.afs_addresses = [
+            f'localhost:{base_afs_port}',
+            f'localhost:{base_afs_port + 1}',
+            f'localhost:{base_afs_port + 2}',
+        ]
+        print(f"[Worker {self.worker_id}] Connecting to AFS Raft cluster...")
+        self.afs_stub = self._connect_to_primary()
+        if not self.afs_stub:
+            print(f"[Worker {self.worker_id}] Failed to connect to AFS cluster!")
+            sys.exit(1)
         
-        # Local cache directory for this worker
         self.cache_dir = f"{CONFIG.afs.afs_temp_path}/{worker_id}" 
         
         # Snapshot related
@@ -57,7 +61,68 @@ class Worker(IWorker):
         self.grpc_server = worker_server.run_worker_server(
             trigger_snapshot_callback=self.worker_snapshot_handler.handle_snapshot
         )
-    
+   
+    def _connect_to_primary(self, max_retries=5):
+        for retry in range(max_retries):
+            for addr in self.afs_addresses:
+                try:
+                    channel = grpc.insecure_channel(addr)
+                    stub = afs_service.FileOperationServiceStub(channel)
+
+                    request = afs_messages.ListFileRequest()
+                    response = stub.ListFiles(request, timeout=2)
+
+                    if not response.error or "Leader" not in response.error:
+                        print(f"[Worker {self.worker_id}] Connected to AFS at {addr}")
+                        self.current_afs_address = addr
+                        return stub
+                    else:
+                        print(f"[Worker {self.worker_id}] {addr} is not primary node")
+
+                except Exception as e:
+                    print(f"[Worker {self.worker_id}] Failed to connect to {addr}: {e}")
+                    continue
+            if retry < max_retries -1:
+                print(f"[Worker {self.worker_id}] No Primary node found, retrying in 2s...")
+                time.sleep(2)
+
+        return None
+
+    def _call_afs_with_retry(self, operation_name, request_func, max_retries=3):
+        for attempt in range(max_retries):
+            try:
+                response = request_func(self.afs_stub)
+                if hasattr(response, 'error') and response.error:
+                    if "not the primary" in response.error:
+                        print(f"[Worker {self.worker_id}] {operation_name}: Need to reconnect to primary server")
+                        new_stub = self._connect_to_primary()
+                        if new_stub:
+                            self.afs_stub = new_stub
+                            print(f"[Worker {self.worker_id}] Reconnected, retrying {operation_name}...")
+                            continue
+                        else:
+                            print(f"[Worker {self.worker_id}] Failed to reconnect")
+                            return None
+                    return response
+            except grpc.RpcError as e:
+                print(f"f[Worker {self.worker_id}] gRPC error in {operation_name} (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    print(f"[Worker {self.worker_id}] Trying to reconnect...")
+                    new_stub = self._connect_to_afs()
+                    if new_stub:
+                        self.afs_stub = new_stub
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        print(f"[Worker {self.worker_id}] Reconnection failed")
+                        return None
+
+            except Exception as e:
+                print(f"[Worker {self.worker_id}] Unexpected error in {operation_name}: {e}")
+                return None
+        print(f"[Worker {self.worker_id}] {operation_name} failed after {max_retries} attempts")
+        return None
+
     def run_task(self):
         """
         Handle main task processing loop.
@@ -135,34 +200,33 @@ class Worker(IWorker):
         file_handle = None
         prime_numbers = set()
         try:
-            # open file from AFS
-            request = afs_messages.OpenFileRequest(
+            request_id = f"{self.worker_id}-open-{uuid.uuid4()}"
+            open_request = afs_messages.OpenFileRequest(
                 filename=filename,
-                request_id=f"{self.worker_id}-{uuid.uuid4()}"
+                request_id=request_id
             )
-            response = self.afs_stub.OpenFile(request)
+            open_response = self._call_afs_with_retry(
+                "OpenFile",
+                lambda stub: stub.OpenFile(open_request)
+            )
+            if open_response.error:
+                print(f"[Worker {self.worker_id}] Erroing opening file: {open_response.error}")
 
-            if response.error:
-                print(f"[Worker {self.worker_id}] Error opening file: {response.error}")
-                return False
-
-            file_handle = response.handle
-
-            if file_handle is None:
-                print(f"[Worker {self.worker_id}] Error: Could not open file {filename}")
-                return False
+            file_handle = open_response.handle
+            print(f"[Worker {self.worker_id}] File opened with handle: {file_handle}")
             
-            # read file content from AFS
             read_request = afs_messages.ReadFileRequest(handle=file_handle)
-            read_response = self.afs_stub.ReadFile(read_request)
-
+            read_response = self._call_afs_with_retry(
+                "ReadFile",
+                lambda stub: stub.ReadFile(read_request)
+            )
             if read_response.error:
                 print(f"[Worker {self.worker_id}] Error reading file: {read_response.error}")
                 return False
 
             content = read_response.content.decode('utf-8').splitlines()
-            
-            # cache file locally
+            print(f"[Worker {self.worker_id}] Read {len(content)} lines")
+
             with open(cache_file_path, 'w') as cache_file:
                 cache_file.write("\n".join(content))
             print(f"[Worker {self.worker_id}] Cached file {filename} locally.")
@@ -207,20 +271,20 @@ class Worker(IWorker):
                 
         finally:
             if file_handle is not None:
-                try:
                     close_request = afs_messages.CloseFileRequest(
                         handle=file_handle,
                         modified=False,
                         request_id=f"{self.worker_id}-close-{filename}-{uuid.uuid4()}"
                     )
-                    close_response = self.afs_stub.CloseFile(close_request)
+                    close_response = self._call_afs_with_retry(
+                        "CloseFile",
+                        lambda stub: stub.CloseFile(close_request)
+                    )
                     
                     if close_response.error:
                         print(f"[Worker {self.worker_id}] Error closing file: {close_response.error}")
                     else:
                         print(f"[Worker {self.worker_id}] Closed file {filename}")
-                except grpc.RpcError as e:
-                    print(f"[Worker {self.worker_id}] gRPC error while closing file: {e}")
                     
 if __name__ == '__main__':
     worker_id = sys.argv[1] if len(sys.argv) > 1 else 'worker-1'

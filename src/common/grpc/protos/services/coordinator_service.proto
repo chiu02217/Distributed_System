@@ -8,10 +8,3 @@ service CoordinatorService {
     rpc Heartbeat (HeartbeatRequest) returns (HeartbeatResponse);
 }
 
-message HeartbeatRequest {
-    string worker_id = 1;
-}
-
-message HeartbeatResponse {
-    bool acknowledged = 1;
-}

@@ -358,14 +358,14 @@ def start_afs_server(node_id):
     service.add_FileOperationServiceServicer_to_server(
         FileOperationServiceServicer(input_dir, output_dir, raft_storage), grpc_server
     )
-    grpc_server.add_insecure_port(f'[::]:{port}')
+    grpc_server.add_insecure_port(f'[::]:{grpc_port}')
     grpc_server.start()
-    print(f"[AFS Server({node_id})] starts on port {port}")
+    print(f"[AFS Server({node_id})] starts on port {grpc_port}")
 
     try:
         while True:
             time.sleep(10)
-            if raft_store._isLeader():
+            if raft_storage._isLeader():
                 print(f"[AFS Server({node_id})] Primary node is running")
             else:
                 print(f"[AFS Server({node_id})] Backup node is running")

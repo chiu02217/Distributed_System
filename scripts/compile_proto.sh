@@ -45,6 +45,14 @@ for file in "$OUTPUT_DIR"/coordinator_service_*.py*; do
     fi
 done
 
+# Fix coordinator_service imports if exists
+for file in "$OUTPUT_DIR"/snapshot_service_*.py*; do
+    if [ -f "$file" ]; then
+        sed -i 's/import snapshot_message_pb2/from . import snapshot_message_pb2/g' "$file"
+        sed -i 's/import snapshot_service_pb2/from . import snapshot_service_pb2/g' "$file"
+    fi
+done
+
 # create __init__.py
 touch "$OUTPUT_DIR/__init__.py"
 

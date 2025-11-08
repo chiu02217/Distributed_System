@@ -14,7 +14,8 @@ from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as coord
 from src.common.grpc.auto_generated import snapshot_message_pb2 as snapshot_messages
 from src.common.grpc.auto_generated import snapshot_service_pb2_grpc as snapshot_service
 from src.common.config_loader import CONFIG
-from src.worker.worker_server import worker_server
+from src.app.worker.worker_server import worker_server
+from src.common.grpc.auto_generated import coordinator_service_pb2
 
     
 class Worker(IWorker):
@@ -117,7 +118,7 @@ class Worker(IWorker):
         while not self.stop_heartbeat.is_set():
             try:
                 self.coordinator_stub.Heartbeat(
-                    coordinator_messages.HeartbeatRequest(worker_id=self.worker_id)
+                    coordinator_service_pb2.HeartbeatRequest(worker_id=self.worker_id)
                 )
                 print(f"[Worker {self.worker_id}] Sent heartbeat")
             except grpc.RpcError as e:

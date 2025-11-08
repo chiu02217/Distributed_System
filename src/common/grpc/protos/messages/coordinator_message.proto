@@ -22,10 +22,10 @@ message SubmitResultResponse {
     bool success = 1;
 }
 
-message HeartbeatRequest{
+message HeartbeatRequest {
     string worker_id = 1;
 }
 
-message HeartbeatResponse{
+message HeartbeatResponse {
     bool acknowledged = 1;
 }

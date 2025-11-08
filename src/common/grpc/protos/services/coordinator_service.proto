@@ -5,5 +5,6 @@ import "coordinator_message.proto";
 service CoordinatorService {
     rpc GetTask (GetTaskRequest) returns (GetTaskResponse);
     rpc SubmitResult (SubmitResultRequest) returns (SubmitResultResponse);
-    rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+    rpc Heartbeat (HeartbeatRequest) returns (HeartbeatResponse);
 }
+

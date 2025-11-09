@@ -29,7 +29,7 @@ class RaftStorage(SyncObj):
     def is_request_executed(self, request_id):
         if not request_id:
             return False
-        return f"request_{request_id}" in self._data
+        return f"req_{request_id}" in self._data
 
     @replicated
     def mark_request_executed(self, request_id, response_data):
@@ -89,7 +89,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         if request_id and self.raft.is_request_executed(request_id):
             cached_response = self.raft.get_cached_response(request_id)
             response.handle = cached_response.get('handle', 0)
-            response.error = cached.get('error','')
+            response.error = cached_response.get('error','')
             print(f"[AFS Server] The request_id({request_id}) has been executed before, with handle{response.handle}")
             return response
 
@@ -134,7 +134,12 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             return response
 
         try:
-            handle_info = self.raft.get(f"handle_{request.handle}")
+            handle_info = None
+            for _ in range(5):
+                handle_info = self.raft.get(f"handle_{request.handle}")
+                if handle_info:
+                    break
+                time.sleep(0.2)
             if not handle_info:
                 response.error = f"Invalid handle: {handle_info}"
                 return response
@@ -166,7 +171,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         if request_id and self.raft.is_request_executed(request_id):
             cached_response = self.raft.get_cached_response(request_id)
             response.handle = cached_response.get('handle', 0)
-            response.error = cached.get('error','')
+            response.error = cached_response.get('error','')
             print(f"[AFS Server] The request_id({request_id}) has been executed before, with handle{response.handle}")
             return response
         
@@ -215,7 +220,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         if request_id and self.raft.is_request_executed(request_id):
             cached_response = self.raft.get_cached_response(request_id)
             response.handle = cached_response.get('handle', 0)
-            response.error = cached.get('error','')
+            response.error = cached_response.get('error','')
             print(f"[AFS Server] The request_id({request_id}) has been executed before, with handle{response.handle}")
             return response
         
@@ -268,7 +273,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         if request_id and self.raft.is_request_executed(request_id):
             cached_response = self.raft.get_cached_response(request_id)
             response.handle = cached_response.get('handle', 0)
-            response.error = cached.get('error','')
+            response.error = cached_response.get('error','')
             print(f"[AFS Server] The request_id({request_id}) has been executed before, with handle{response.handle}")
             return response
         
@@ -304,11 +309,11 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             response.error = str(e)
             print(f"[AFS Server] Error closing file: {e}")
             
-        if request_id:
-            self.raft.mark_request_executed(request_id, {
-                'success': False,
-                'error': str(e)
-            })
+            if request_id:
+                self.raft.mark_request_executed(request_id, {
+                    'success': False,
+                    'error': str(e)
+                })
                 
         return response
 

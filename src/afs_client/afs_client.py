@@ -20,30 +20,26 @@ class AFSClient(IAFSClient):
     # open a file from AFS server, return handle
     def open_file(self, filename: str):
         try:
-            request: messages.OpenFileRequest = messages.OpenFileRequest(filename=filename)
-            response: messages.OpenFileResponse = self.stub.OpenFile(request)
+            request = messages.OpenFileRequest(filename=filename)
+            response = self.stub.OpenFile(request)
             
             if response.error:
                 print(f"Error: {response.error}")
                 return None
             
-            local_path = os.path.join(self.cache_dir, filename)
-            with open(local_path, 'wb') as f:
-                f.write(response.content)
-                
-            # Open file object for reading
-            file_obj = open(local_path, 'rb')
+            handle = response.handle
             
-            # Store file info
-            self.open_files[response.handle] = {
+            local_path = os.path.join(self.cache_dir, filename)
+            
+            self.open_files[handle] = {
                 'filename': filename,
                 'path': local_path,
                 'modified': False,
-                'file_obj': file_obj,
+                'file_obj': None,
                 'mode': 'read'
             }
-            return response.handle
-        
+            return handle
+
         except Exception as e:
             print(f"Exception during open_file: {e}")
             return None
@@ -51,8 +47,8 @@ class AFSClient(IAFSClient):
     # create a new file on AFS server
     def create_file(self, filename: str):
         try:
-            request: messages.CreateFileRequest = messages.CreateFileRequest(filename=filename)
-            response: messages.CreateFileResponse = self.stub.CreateFile(request)
+            request =  messages.CreateFileRequest(filename=filename)
+            response = self.stub.CreateFile(request)
             
             if response.error:
                 print(f"File creating error: {response.error}")
@@ -86,7 +82,6 @@ class AFSClient(IAFSClient):
         
         try:
             line = str(data) + '\n'
-            # Write data to local cached file
             file_info['file_obj'].write(line.encode('utf-8'))
             file_info['file_obj'].flush()
             file_info['modified'] = True
@@ -103,6 +98,24 @@ class AFSClient(IAFSClient):
             return None
 
         file_info = self.open_files[handle]
+       
+        if file_info['file_obj'] is None:
+            try:
+                read_request = messages.ReadFileRequest(handle=handle)
+                read_response = self.stub.ReadFile(read_request)
+
+                if read_response.error:
+                    print(f"Error reading file from server: {read_response.error}")
+                    return None
+                
+                with open(file_info['path'], 'wb') as f:
+                    f.write(read_response.content)
+
+                file_info['file_obj'] = open(file_info['path'], 'rb')
+
+            except Exception as e:
+                print(f"Error during remote read_file: {e}")
+                return None
         
         try:
             line = file_info['file_obj'].readline()
@@ -111,7 +124,6 @@ class AFSClient(IAFSClient):
             
             line_str = line.decode('utf-8').strip()
             filter = re.search(r'\d+', line_str)
-            # addressing number, only accept first number per line
             if filter:
                 return filter.group(0)
             else:
@@ -130,7 +142,6 @@ class AFSClient(IAFSClient):
         content = b'' # create empty content if not modified
         
         if 'file_obj' in file_info and file_info['file_obj']:
-            # Close the file object before reading, avoid duplicate open
             file_info['file_obj'].close()
             
         if file_info['modified']:
@@ -164,7 +175,7 @@ class AFSClient(IAFSClient):
     def list_files(self):
         try:
             request = messages.ListFilesRequest()
-            response: messages.ListFilesResponse = self.stub.ListFiles(request)
+            response = self.stub.ListFiles(request)
             
             if response.error:
                 print(f"Error listing files: {response.error}")

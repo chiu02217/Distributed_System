@@ -46,7 +46,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
        
         self.raft = raft_storage
         self.next_handle = 1
-        
+        self.handle_lock = threading.Lock()        
         print(f"[AFS Server] initialized: input_dir={self.input_dir}, output_dir={self.output_dir}")
 
     def _is_primary(self):
@@ -81,7 +81,9 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         
         if not self._is_primary():
             response.error = "Current node is not the primary server. Please connect to the primary server."
-            print(f"[AFS Server] Error: {response.error}") 
+            print(f"[AFS Server] Error: {response.error}")
+            return response
+
       
         request_id = self._get_request_id(request)
         if request_id and self.raft.is_request_executed(request_id):
@@ -93,8 +95,11 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
 
         try:
             file_path = self._get_file_path(request.filename)
-            handle = self.next_handle
-            self.next_handle += 1
+            
+            with self.handle_lock:
+                handle = self.next_handle
+                self.next_handle += 1
+            
             self.raft.set(f"handle_{handle}",{
                     'filename': request.filename,
                     'path': file_path,
@@ -126,6 +131,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         if not self._is_primary():
             response.error = "Current node is not the primary server. Please connect to the primary server."
             print(f"[AFS Server] Error: {response.error}") 
+            return response
 
         try:
             handle_info = self.raft.get(f"handle_{request.handle}")
@@ -168,9 +174,10 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             file_path = self._get_file_path(request.filename)
             with open(file_path, 'wb') as f: 
                 pass
-
-            handle = self.next_handle
-            self.next_handle += 1
+            
+            with self.handle_lock:
+                handle = self.next_handle
+                self.next_handle += 1
             self.raft.set(f"handle_{handle}", {
                     'filename': request.filename,
                     'path': file_path,
@@ -202,7 +209,8 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         if not self._is_primary():
             response.error = "Current node is not the primary server. Please connect to the primary server."
             print(f"[AFS Server] Error: {response.error}") 
-      
+            return response
+
         request_id = self._get_request_id(request)
         if request_id and self.raft.is_request_executed(request_id):
             cached_response = self.raft.get_cached_response(request_id)
@@ -254,7 +262,8 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         if not self._is_primary():
             response.error = "Current node is not the primary server. Please connect to the primary server."
             print(f"[AFS Server] Error: {response.error}") 
-        
+            return response
+
         request_id = self._get_request_id(request)
         if request_id and self.raft.is_request_executed(request_id):
             cached_response = self.raft.get_cached_response(request_id)
@@ -349,7 +358,10 @@ def start_afs_server(node_id):
 
     if raft_storage.isReady():
         leader = raft_storage._getLeader()
-        print(f"[AFS Server({node_id})] Raft is ready! Current Leader: {leader.address}")
+        if leader:
+            print(f"[AFS Server({node_id})] Raft is ready! Current Leader: {leader.address}")
+        else:
+            print(f"[AFS Server({node_id})] Raft is ready! No leader yet")
     else:
         print(f"[AFS Server({node_id})] Raft is not ready, but will continue to retry.")
 

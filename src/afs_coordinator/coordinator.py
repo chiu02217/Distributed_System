@@ -44,15 +44,11 @@ def safe_call(func, max_retries=3, delay=1, *args, **kwargs):
     return None
         
 class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapshot_service.SnapshotServiceServicer):
-    # 3/11/2025: Coordinator Servicer init
     def __init__(self):
-        # Task queue: stores filenames waiting to be processed
         self.task_queue = Queue() 
         
-        # Processing tasks: {'worker_id': id, 'assigned_task': filename}
         self.assigned_tasks = {} 
         
-        # Primes storage | set to avoid duplicates
         self.all_primes = set()
         
         # Locks for thread safety
@@ -62,23 +58,20 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         self.worker_regis_lock = threading.Lock()
         self.heartbeat_lock = threading.Lock()
         self.submission_lock = threading.Lock()
-        self.submitted_requests = set() # request_id set
+        self.submitted_requests = set() 
         
         # snapshot related
         self.workers = {}  # {worker_id: worker_address}
         self.worker_stubs = {}  # {worker_id: grpc stub}
-        
-        # Statistics
         self.is_finished = False
         
-        # AFS connection
         afs_server_address = CONFIG.afs.server_address
         print(f"[Coordinator] Connecting to AFS at {afs_server_address}...")
         
         try:
             channel = grpc.insecure_channel(afs_server_address)
             self.afs_stub = afs_service.FileOperationServiceStub(channel)
-            self._load_tasks_from_afs() # load tasks from AFS system
+            self._load_tasks_from_afs()
             print(f"[Coordinator] Connected to AFS server at {afs_server_address}")
         except Exception as e:
             print(f"[Coordinator] Failed to connect to AFS server: {e}")
@@ -92,18 +85,14 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         print(f"[Coordinator] Loaded tasks from AFS.")
 
         # snapshot manager
-        # 3/11/2025: enable snapshot manager
         # self.snapshot_manager = CoordinatorSnapshotHandler(self)
         # self.snapshot_manager.start_snapshot_thread()
 
      
-    #  3/11/2025: load tasks from AFS
     def _load_tasks_from_afs(self):
-        def list_files():
-            request = afs_messages.ListFilesRequest()
-            return self.afs_stub.ListFiles(request)
-        
-        response = safe_call(list_files, max_retries=5, delay=2)
+        list_file_request = afs_messages.ListFilesRequest()
+        list_file_response = self.afs_stub.ListFiles(request)
+        response = safe_call(list_file_response, max_retries=5, delay=2)
         
         if response is None:
             print("[Coordinator] Error listing files from AFS after retries.")
@@ -131,7 +120,7 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         response = coordinator_messages.GetTaskResponse()
         worker_id = request.worker_id
        
-        # 3/11/2025: logic 1: resume task if worker is restarting
+        # logic 1: resume task if worker is restarting
         with self.processing_lock:
             if worker_id in self.assigned_tasks:
                 filename = self.assigned_tasks[worker_id]
@@ -170,7 +159,6 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         with self.primes_lock:
             self.all_primes.update(request.primes)
 
-        # 3/11/2025: remove the completed_task related code
         with self.task_lock:
             self.assigned_tasks.pop(request.worker_id, None)
             print(f"[Coordinator] Received results for task {request.filename} from worker {request.worker_id}. Total unique primes so far: {len(self.all_primes)}")
@@ -181,8 +169,8 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
                 self._save_results()
 
         return coordinator_messages.SubmitResultResponse(success=True)
-    
-    # Handle the RegisterWorker gRPC request.
+   
+    # snapshot related
     def RegisterWorkerId(self, request: snapshot_messages.RegisterWorkerIdRequest, context):
         worker_id = request.worker_id
         worker_address = request.worker_address
@@ -190,16 +178,13 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         with self.worker_regis_lock:
             if worker_id not in self.workers:
                 print(f"[Coordinator] register new Worker: {worker_id} @ {worker_address}")
-                # Worker gRPC STUB
                 channel = grpc.insecure_channel(worker_address)
                 stub = snapshot_service.SnapshotServiceStub(channel)
 
-                # store Worker info
                 self.workers[worker_id] = worker_address
                 self.worker_stubs[worker_id] = stub
             else:
                 print(f"[Coordinator] Worker {worker_id} re-registered.")
-                # (您可能還需要更新 channel 和 stub)
 
         return snapshot_messages.RegisterWorkerIdResponse(success=True)
         
@@ -217,12 +202,7 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
                 request_id=f"coordinator-create-{filename}"
             )
             
-            create_response = safe_call(
-                self.afs_stub.CreateFile, 
-                3,  # max_retries as position argument
-                1,  # delay as position argument
-                create_request  # request as position argument
-            )
+            create_response = safe_call(self.afs_stub.CreateFile,3,1,create_request)
             
             if create_response is None or create_response.error:
                 print(f"[Coordinator] Error creating file {filename} in AFS: {create_response.error if create_response else 'No response'}")
@@ -254,12 +234,11 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
             print(f"[Coordinator] Exception while saving results to AFS: {e}")
         
         finally:
-            # Close the file in AFS
             if file_handle is not None:
                 def close_file():
                     close_request = afs_messages.CloseFileRequest(
                         handle=file_handle,
-                        request_id = f"coordinator-{uuid.uuid4()}"  # unique request ID
+                        request_id = f"coordinator-{uuid.uuid4()}"
                     )
                     return self.afs_stub.CloseFile(close_request)
                 
@@ -277,8 +256,6 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         return coordinator_messages.HeartbeatResponse(acknowledged=True) 
     
     def _monitor_heartbeats(self):
-        # might have to change the while loop
-        # 3/11/2025: monitor heartbeats
         while not self.is_finished:
             now = time.time()
             for worker_id, last_seen in list(self.last_heartbeat.items()):
@@ -303,12 +280,10 @@ def run_coordinator_server():
     try:
         while not coordinator_servicer.is_finished:
             time.sleep(1)
-            
         print("[Coordinator] All tasks processed. Press Ctrl+C to stop the server.")
         coordinator_server.wait_for_termination()
     except KeyboardInterrupt:
         print("[Coordinator] Shutting down server...")
-        
         if not coordinator_servicer.is_finished:
             coordinator_servicer._save_results()
             print("[Coordinator] Not all tasks were completed before shutdown.")

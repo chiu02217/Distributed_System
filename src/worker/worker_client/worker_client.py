@@ -45,10 +45,8 @@ class Worker(IWorker):
         # Snapshot related
         common_channel = grpc.insecure_channel(coordinator_address)
         self.snapshot_stub = snapshot_service.SnapshotServiceStub(common_channel)
-
         self.state_lock = threading.Lock() 
         self.current_snapshot_id = 0
-        
         self.current_task_filename = None
         self.current_task_line = 0     
         self.worker_snapshot_handler = WorkerSnapshotHandler(self)
@@ -63,6 +61,7 @@ class Worker(IWorker):
         )
    
     def _connect_to_primary(self, max_retries=5):
+        # Utilize the Raft cluster to connect primary server
         for retry in range(max_retries):
             for addr in self.afs_addresses:
                 try:
@@ -70,7 +69,7 @@ class Worker(IWorker):
                     stub = afs_service.FileOperationServiceStub(channel)
 
                     request = afs_messages.ListFilesRequest()
-                    response = stub.ListFiles(request, timeout=2)
+                    response = stub.ListFiles(request, timeout=3)
 
                     if not response.error:
                         print(f"[Worker {self.worker_id}] Connected to AFS at {addr}")
@@ -104,11 +103,12 @@ class Worker(IWorker):
                             print(f"[Worker {self.worker_id}] Failed to reconnect")
                             return None
                     return response
+                return response
             except grpc.RpcError as e:
                 print(f"f[Worker {self.worker_id}] gRPC error in {operation_name} (attempt {attempt+1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     print(f"[Worker {self.worker_id}] Trying to reconnect...")
-                    new_stub = self._connect_to_afs()
+                    new_stub = self._connect_to_primary()
                     if new_stub:
                         self.afs_stub = new_stub
                         time.sleep(0.5)
@@ -132,9 +132,7 @@ class Worker(IWorker):
         3. Otherwise, pull new task file and process to find prime numbers.
         """
         print(f"[Worker {self.worker_id}] Started!")
-        # first register itself Id to coordinator
         try:
-            # tell Coordinator how to call back
             register_req = snapshot_messages.RegisterWorkerIdRequest(
                 worker_id=self.worker_id,
                 worker_address=f"localhost:{self.worker_port}"
@@ -142,7 +140,7 @@ class Worker(IWorker):
             self.snapshot_stub.RegisterWorkerId(register_req)
             print(f"[Worker {self.worker_id}] register to coordinator success.")
         except grpc.RpcError as e:
-            print(f"[Worker {self.worker_id}] register to coordinator error:  {e}")
+            print(f"[Worker {self.worker_id}] register to coordinator error: {e}")
             self.grpc_server.stop(0)
             return
         
@@ -164,6 +162,7 @@ class Worker(IWorker):
                 break
             
             print(f"[Worker {self.worker_id}] Received task: {task.filename}")
+            
             # for snapshot
             with self.state_lock:
                 self.current_task_filename = task.filename
@@ -215,7 +214,7 @@ class Worker(IWorker):
                 print(f"[Worker {self.worker_id}] Error opening file: no response")
                 return False
             if open_response.error:
-                print(f"[Worker {self.worker_id}] Erroing opening file: {open_response.error}")
+                print(f"[Worker {self.worker_id}] Error opening file: {open_response.error}")
                 return False
 
             file_handle = open_response.handle
@@ -291,9 +290,9 @@ class Worker(IWorker):
                         lambda stub: stub.CloseFile(close_request)
                     )
                     
-                    if close_response.error:
+                    if close_response.error and close_response.error:
                         print(f"[Worker {self.worker_id}] Error closing file: {close_response.error}")
-                    else:
+                    elif close_response:
                         print(f"[Worker {self.worker_id}] Closed file {filename}")
                     
 if __name__ == '__main__':

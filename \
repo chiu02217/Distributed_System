@@ -91,7 +91,7 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
      
     def _load_tasks_from_afs(self):
         list_file_request = afs_messages.ListFilesRequest()
-        response = safe_call(self.afs_stub.ListFiles, max_retries=5, delay=2, request=list_file_request)
+        response = safe_call(self.afs_stub.ListFiles(list_file_request), max_retries=5, delay=2, request=list_file_request)
         
         if response is None:
             print("[Coordinator] Error listing files from AFS after retries.")

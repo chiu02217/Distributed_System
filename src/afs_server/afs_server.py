@@ -15,7 +15,7 @@ class RaftStorage(SyncObj):
         self._data = {}
 
     @replicated
-    def sef(self, key, value):
+    def set(self, key, value):
         self._data[key] = value
 
     def get(self, key, default=None):

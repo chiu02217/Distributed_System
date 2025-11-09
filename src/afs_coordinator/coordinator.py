@@ -274,7 +274,7 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         worker_id = request.worker_id
         self.last_heartbeat[worker_id] = time.time()
         print(f"[Coordinator] Heartbeat received from {worker_id}")
-        return coordinator_service_pb2.HeartbeatResponse(acknowledged=True) 
+        return coordinator_messages.HeartbeatResponse(acknowledged=True) 
     
     def _monitor_heartbeats(self):
         # might have to change the while loop

@@ -69,15 +69,15 @@ class Worker(IWorker):
                     channel = grpc.insecure_channel(addr)
                     stub = afs_service.FileOperationServiceStub(channel)
 
-                    request = afs_messages.ListFileRequest()
+                    request = afs_messages.ListFilesRequest()
                     response = stub.ListFiles(request, timeout=2)
 
-                    if not response.error or "Leader" not in response.error:
+                    if not response.error:
                         print(f"[Worker {self.worker_id}] Connected to AFS at {addr}")
                         self.current_afs_address = addr
                         return stub
                     else:
-                        print(f"[Worker {self.worker_id}] {addr} is not primary node")
+                        print(f"[Worker {self.worker_id}] {addr} returned error: {response.error}")
 
                 except Exception as e:
                     print(f"[Worker {self.worker_id}] Failed to connect to {addr}: {e}")
@@ -145,12 +145,12 @@ class Worker(IWorker):
             print(f"[Worker {self.worker_id}] register to coordinator error:  {e}")
             self.grpc_server.stop(0)
             return
-        # request new task from coordinator
+        
         while True:
-            try: 
-                task: coordinator_messages.GetTaskResponse = self.coordinator_stub.GetTask(
-                    coordinator_messages.GetTaskRequest(worker_id=self.worker_id)
-                )
+            try:
+                task_request = coordinator_messages.GetTaskRequest(worker_id=self.worker_id)
+                task_response = self.coordinator_stub.GetTask(task_request)
+                task = task_response
             except grpc.RpcError as e:
                 print(f"[Worker {self.worker_id}] gRPC error while getting task: {e}")
                 break
@@ -160,7 +160,6 @@ class Worker(IWorker):
             
             if not task.has_task:
                 print(f"[Worker {self.worker_id}] No more tasks available. Exiting.")
-                # stop heartbeat after tasks complete
                 self.stop_heartbeat.set()
                 break
             
@@ -170,9 +169,11 @@ class Worker(IWorker):
                 self.current_task_filename = task.filename
                 self.current_task_line = 0
             
-            # what to do when not successful or successful(asked by danny)
             success = self._process_task(task.filename)
-            # clear current task state
+            if not success:
+                print(f"[Worker {self.worker_id}] Task {task.filename} failed, will retry later")
+                time.sleep(5)
+
             with self.state_lock:
                 self.current_task_filename = None
                 self.current_task_line = 0
@@ -183,7 +184,7 @@ class Worker(IWorker):
         while not self.stop_heartbeat.is_set():
             try:
                 self.coordinator_stub.Heartbeat(
-                    coordinator_service_pb2.HeartbeatRequest(worker_id=self.worker_id)
+                    coordinator_messages.HeartbeatRequest(worker_id=self.worker_id)
                 )
                 print(f"[Worker {self.worker_id}] Sent heartbeat")
             except grpc.RpcError as e:
@@ -209,8 +210,13 @@ class Worker(IWorker):
                 "OpenFile",
                 lambda stub: stub.OpenFile(open_request)
             )
+
+            if not open_response:
+                print(f"[Worker {self.worker_id}] Error opening file: no response")
+                return False
             if open_response.error:
                 print(f"[Worker {self.worker_id}] Erroing opening file: {open_response.error}")
+                return False
 
             file_handle = open_response.handle
             print(f"[Worker {self.worker_id}] File opened with handle: {file_handle}")
@@ -220,6 +226,10 @@ class Worker(IWorker):
                 "ReadFile",
                 lambda stub: stub.ReadFile(read_request)
             )
+            
+            if not read_response:
+                print(f"[Worker {self.worker_id}] Error reading file: no response")
+                return False
             if read_response.error:
                 print(f"[Worker {self.worker_id}] Error reading file: {read_response.error}")
                 return False

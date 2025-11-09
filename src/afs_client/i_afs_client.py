@@ -87,7 +87,7 @@ class IAFSClient(ABC):
         pass
 
     @abstractmethod
-    def list_files(self):
+    def list_files(self, path):
         """
         List all files stored on the AFS server.
 
@@ -97,7 +97,7 @@ class IAFSClient(ABC):
         pass
 
     @abstractmethod
-    def find_latest_coordinator_snapshot(self, input_dir):
+    def find_latest_coordinator_snapshot(self):
         """
         Find the latest coordinator snapshot file in AFS.
 
@@ -117,4 +117,8 @@ class IAFSClient(ABC):
         Returns:
             dict: The content of the JSON file, or None if not found.
         """
+        pass
+
+    @abstractmethod
+    def find_latest_worker_snapshot(self, worker_id:str):
         pass

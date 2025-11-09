@@ -10,9 +10,9 @@
             "afs_temp_path": "./afs/temp",
             "server_address": "localhost:8000",
             "port": 8000,
-            "input_dir": "./data/server_storage/input",
-            "snapshot_dir": "./data/server_storage/snapshots",
-            "output_dir": "./data/server_storage/output"
+            "input_dir": "./data/input",
+            "snapshot_dir": "./data/snapshot",
+            "output_dir": "./data/output"
         },
     "coordinator":
         {

@@ -11,3 +11,9 @@ desktop.ini
 .idea/
 data/server_storage/output/*.json
 data/server_storage/input/input_dataset_biggest.txt
+data/snapshot
+data/output
+scripts/afs
+afs/temp
+afs/*
+data/input/input_dataset_biggest.txt

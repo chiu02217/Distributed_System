@@ -1,14 +1,12 @@
 import threading
 import time
 import json
-from src.common.config_loader import CONFIG
 from src.common.grpc.auto_generated import coordinator_message_pb2 as messages
 from src.afs_coordinator.snapshot.i_coordinator_snapshot import ICoordinatorSnapshotHandler
-from src.common.grpc.auto_generated import snapshot_message_pb2 as snapshot_messages
 from typing import TYPE_CHECKING 
 
 if TYPE_CHECKING:
-    from src.afs_coordinator.coordinator import CoordinatorServicer 
+    from src.afs.coordinator.coordinator_server import CoordinatorServicer 
 
 # snapshot frequency
 SNAPSHOT_FREQUENCY_SECONDS = 30
@@ -17,7 +15,6 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
     def __init__(self, coordinator: 'CoordinatorServicer'):
         self.coordinator = coordinator
         self.afs_client = coordinator.afs_client
-        self.snapshot_dir = CONFIG.afs.snapshot_dir
         self.current_snapshot_id = 0
         # 儲存 { snapshot_id: state_data }
         self.snapshot_state = {}
@@ -38,7 +35,7 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
     def initiate_snapshot(self):
         # id from 1
         self.current_snapshot_id += 1
-        snapshot_id = self.current_snapshot_id
+        snapshot_id = self.current_snapshot_id + 1
         print(f"[SnapshotManager] Snapshot {snapshot_id}")
         #  Coordinator state
         coord_state = {}
@@ -68,47 +65,6 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
 
         # already sent to all Worker (在下次 GetTask 時)
         print(f"[Snapshot] Coordinator state saved for snapshot {snapshot_id}.")
-        # --- 3. *** 關鍵修正：主動發送標記 *** ---
-        #print(f"[SnapshotManager] 正在向 {len(workers)} 個 Worker 主動發送標記 {snapshot_id}...")
-        #failed_workers = []
-
-        # ensure snapshot lock exists
-        if not hasattr(self, "_snapshot_lock"):
-            self._snapshot_lock = threading.Lock()
-
-        with self.coordinator.worker_regis_lock:
-            for worker_id, stub in self.coordinator.worker_stubs.items():
-                # only send to currently known workers
-                if worker_id in workers:
-                    try:
-                        # call TriggerSnapshot RPC on Worker server
-                        req = snapshot_messages.TriggerSnapshotRequest(snapshot_id=snapshot_id)
-                        stub.TriggerSnapshot(req)
-                    except Exception as e:
-                        print(f"[SnapshotManager] Failed to send marker to {worker_id}: {e}")
-                        # record failed worker
-                        #failed_workers.append(worker_id)
-
-        # handle failed workers outside the registration lock
-        # if failed_workers:
-        #     print(f"[SnapshotManager] Handling {len(failed_workers)} unresponsive workers...")
-        #     with self._snapshot_lock:
-        #         if snapshot_id in self.snapshot_state:
-        #             state_data = self.snapshot_state[snapshot_id]
-        #             for worker_id in failed_workers:
-        #                 # Chandy-Lamport crash handling: pretend we received the marker
-        #                 if worker_id in state_data.get("channels_to_record", []):
-        #                     state_data["channels_to_record"].remove(worker_id)
-        #                     print(f"[SnapshotManager] Treating {worker_id} as crashed; stop recording its channel.")
-        #                     # channel messages list is empty for crashed worker (or existing recorded msgs)
-        #                     msgs = state_data.get("channel_messages", {}).get(worker_id, [])
-        #                     channel_filename = f"snapshot_channel_W-C_{worker_id}_{snapshot_id}.json"
-        #                     self.save_state_to_afs(channel_filename, msgs)
-
-        #             # check if snapshot is now complete
-        #             if not state_data.get("channels_to_record"):
-        #                 print(f"[SnapshotManager] --- Global Snapshot {snapshot_id} COMPLETED (worker crash) ---")
-        #                 del self.snapshot_state[snapshot_id]
 
     # send snapshot_id to worker
     def send_snapshot_id_to_worker(self, response: messages.GetTaskResponse):

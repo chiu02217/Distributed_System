@@ -11,7 +11,7 @@ from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as coord
 from src.common.grpc.auto_generated import snapshot_service_pb2_grpc as snapshot_service
 from src.common.grpc.auto_generated import snapshot_message_pb2 as snapshot_messages
 from src.afs.coordinator.snapshot.coordinator_snapshot import CoordinatorSnapshotHandler
-from src.afs.afs_client.afs_client import AFSClient
+from src.afs_client.afs_client import AFSClient
 from src.common.config_loader import CONFIG
 from src.common.grpc.auto_generated import coordinator_message_pb2 as messages
 from src.common.grpc.auto_generated import coordinator_service_pb2_grpc as service
@@ -161,7 +161,7 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
     # load tasks from AFS into the task queue
     def _load_tasks_from_afs(self):
         try:
-            filenames = self.afs_client.list_files()
+            filenames = self.afs_client.list_files(path="inputs")
             if not filenames:
                 print("[Coordinator] No files found in AFS.")
                 return

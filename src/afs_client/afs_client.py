@@ -1,7 +1,7 @@
 import grpc
 import os
 import re
-from src.afs.afs_client.i_afs_client import IAFSClient
+from src.afs_client.i_afs_client import IAFSClient
 from src.common.grpc.auto_generated import file_operation_message_pb2 as messages
 from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as service
 from src.common.config_loader import CONFIG
@@ -10,7 +10,6 @@ class AFSClient(IAFSClient):
     def __init__(self, channel: grpc.Channel, cache_dir=CONFIG.afs.afs_temp_path):
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
-        
         self.channel = channel
         self.stub = service.FileOperationServiceStub(self.channel)
         
@@ -20,6 +19,7 @@ class AFSClient(IAFSClient):
     # open a file from AFS server, return handle
     def open_file(self, filename: str):
         try:
+            print(f"AFSClient: opening file {filename} ")
             request: messages.OpenFileRequest = messages.OpenFileRequest(filename=filename)
             response: messages.OpenFileResponse = self.stub.OpenFile(request)
             
@@ -160,15 +160,20 @@ class AFSClient(IAFSClient):
     def mark_modified(self, handle):
         if handle in self.open_files:
             self.open_files[handle]['modified'] = True
-    # TODO: can specify directory
-    def list_files(self):
+    # can specify directory
+    def list_files(self, path:str):
+        if path not in ("inputs", "snapshots", "outputs"):
+            print(f"[AFSClient] Error: '{path}' not a valid logical path.")
+            return None
         try:
-            request = messages.ListFilesRequest()
+            request = messages.ListFilesRequest(file_path=path)
+            print(f"debug: pahth={path}")
             response: messages.ListFilesResponse = self.stub.ListFiles(request)
+            print(f"debug: response = {response}")
             
             if response.error:
-                print(f"Error listing files: {response.error}")
-                return []
+                print(f"Error listing files ({path}): {response.error}")
+                return None
             
             return list(response.filenames)
         
@@ -177,12 +182,11 @@ class AFSClient(IAFSClient):
             return []
         
     # find the latest coordinator snapshot file
-    # TODO: input directory parameter
-    def find_latest_coordinator_snapshot(self, input_dir="snapshots"):
+    def find_latest_coordinator_snapshot(self):
         print("finding latest coordinator snapshot...")
         try:
             # use existing list_files method to get snapshot files
-            all_files = self.list_files()
+            all_files = self.list_files(path="snapshots")
             if all_files is None:
                 print("Error: list_files() failed")
                 return None
@@ -226,4 +230,40 @@ class AFSClient(IAFSClient):
             
         except Exception as e:
             print(f"[AFS] Error reading entire file from cache: {e}")
+            return None
+    
+    # as title say
+    def find_latest_worker_snapshot(self, worker_id: str):
+
+        print(f"[AFSClient] is searching snapshot for {worker_id} ...")
+        try:
+            # 1. 呼叫您現有的 ListFiles RPC
+            all_files = self.list_files(path="snapshots")
+            if all_files is None:
+                print("[AFSClient] error ")
+                return None
+
+            snapshot_files = []
+            
+            # prefix find
+            regex_pattern = re.compile(f"^snapshot_worker_{re.escape(worker_id)}_(\d+)\.json$")
+            
+            for f in all_files:
+                match = regex_pattern.match(f)
+                if match:
+                    snapshot_id = int(match.group(1)) 
+                    snapshot_files.append((snapshot_id, f))
+            
+            if not snapshot_files:
+                print(f"[AFSClient] cannot find snapshot for {worker_id}")
+                return None
+                
+            snapshot_files.sort(key=lambda x: x[0], reverse=True)
+            # get filename
+            latest_file = snapshot_files[0][1] 
+            print(f"[AFSClient] get the latest snapshot for {worker_id}: {latest_file}")
+            return latest_file
+
+        except Exception as e:
+            print(f"[AFSClient] error when finding latest snapshot for worker: {e}")
             return None

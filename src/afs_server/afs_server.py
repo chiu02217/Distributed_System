@@ -8,14 +8,16 @@ from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as se
 from src.common.config_loader import CONFIG
 
 # for test relative path
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # service implementation, use the file_operation_service_pb2_grpc.py file
 class FileOperationServiceServicer(service.FileOperationServiceServicer):
-    def __init__(self, input_dir, output_dir):
+    def __init__(self, input_dir, output_dir, snapshot_dir):
         # Initialize directories
         self.input_dir = input_dir
         self.output_dir = output_dir
+        self.snapshot_dir = snapshot_dir
+
         
         # Initialize file handle management
         self.file_handles = {} # {handle: {'filename', 'path', 'file_obj', 'mode'}}
@@ -29,9 +31,18 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         print(f"[AFS Server] initialized: input_dir={self.input_dir}, output_dir={self.output_dir}")
 
     def _get_file_path(self, filename:str) -> str:
+        """
+        Get the file path based on the filename.
+        """
         if filename.startswith("input_dataset_"):
             return os.path.join(self.input_dir, filename)
-        return os.path.join(self.output_dir, filename)
+        elif filename.startswith("snapshot_"):
+            return os.path.join(self.snapshot_dir, filename)
+        elif filename.startswith("primes.txt"):
+            return os.path.join(self.output_dir, filename)
+        else:
+            # Default case - put in output directory
+            return os.path.join(self.output_dir, filename)
 
     def _get_request_id(self, request) -> str:
         return getattr(request, 'request_id', None)
@@ -55,11 +66,16 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
                 print(f"[AFS Server] Error: {response.error}")
                 return response
 
+            with open(file_path, 'rb') as f:
+                response.content = f.read()  # put content into response
+
             with self.handle_lock:  # ensure thread safety
                 response.handle = self.next_handle
                 self.file_handles[self.next_handle] = {
                     'filename': request.filename,
                     'path': file_path,
+                    'file_obj': None,
+                    'mode': 'rb',
                 }
             self.next_handle += 1
 
@@ -210,32 +226,62 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
     def ListFiles(self, request: messages.ListFilesRequest, context: grpc.ServicerContext):
         response = messages.ListFilesResponse()
         
-        try:
-            input_files = os.listdir(self.input_dir)
-            filenames = [f for f in sorted(os.listdir(self.input_dir)) if f.startswith("input_dataset_")]
-            response.filenames.extend(filenames)
+        # try:
+        #     input_files = os.listdir(self.input_dir)
+        #     filenames = [f for f in sorted(os.listdir(self.input_dir)) if f.startswith("input_dataset_")]
+        #     response.filenames.extend(filenames)
             
-            print(f"[AFS Server] ListFiles: found {len(filenames)} files.")
-            for filename in filenames:
-                print(f" - {filename}")
+        #     print(f"[AFS Server] ListFiles: found {len(filenames)} files.")
+        #     for filename in filenames:
+        #         print(f" - {filename}")
+        # except Exception as e:
+        #     response.error = str(e)
+        #     print(f"[AFS Server] Error listing files: {e}")
+        # return response
+        target_dir = ""
+        if request.file_path == "inputs":
+            target_dir = self.input_dir
+        elif request.file_path == "snapshots":
+            target_dir = self.snapshot_dir
+        elif request.file_path == "outputs":
+            target_dir = self.output_dir
+
+        try:
+            if not target_dir:
+                response.error = f"Invalid or unsupported path: {request.file_path}"
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                return response
+
+            filenames = [f for f in sorted(os.listdir(target_dir))
+                 if os.path.isfile(os.path.join(target_dir, f))]
+                 
+            response.filenames.extend(filenames)
+            print(f"[AFS Server] ListFiles (path={request.file_path}): found {len(filenames)} files.")
+
         except Exception as e:
             response.error = str(e)
-            print(f"[AFS Server] Error listing files: {e}")
+            print(f"[AFS Server] Error listing files in '{target_dir}': {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            
         return response
-
 def start_afs_server():
     port = CONFIG.afs.port
     input_dir = CONFIG.afs.input_dir
     output_dir = CONFIG.afs.output_dir
+    snapshot_dir = CONFIG.afs.snapshot_dir
     max_workers = CONFIG.afs.can_handle_max_workers
     abs_input_dir = os.path.join(PROJECT_ROOT, input_dir)
     abs_output_dir = os.path.join(PROJECT_ROOT, output_dir)
+    abs_snapshot_dir = os.path.join(PROJECT_ROOT, snapshot_dir)
     file_server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
     service.add_FileOperationServiceServicer_to_server(
-        FileOperationServiceServicer(input_dir=abs_input_dir, output_dir=abs_output_dir), file_server
+        FileOperationServiceServicer(input_dir=abs_input_dir, output_dir=abs_output_dir, snapshot_dir=abs_snapshot_dir), file_server
     )
     file_server.add_insecure_port(f'[::]:{port}')
     print(f"[AFS Server] starts on port {port}")
+    print(f"[AFS Server] Input dir (Absolute): {abs_input_dir}")
+    print(f"[AFS Server] Snapshot dir (Absolute): {abs_snapshot_dir}")
+    print(f"[AFS Server] Output dir (Absolute): {abs_output_dir}")
     file_server.start()
     file_server.wait_for_termination()
 

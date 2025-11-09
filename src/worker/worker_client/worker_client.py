@@ -28,13 +28,20 @@ class Worker(IWorker):
         coordinator_channel = grpc.insecure_channel(coordinator_address)
         self.coordinator_stub = coordinator_service.CoordinatorServiceStub(coordinator_channel)
 
+        single_node = os.getenv("SINGLE_NODE", "false").lower() == "true"
         base_afs_port = CONFIG.afs.port
-        self.afs_addresses = [
-            f'localhost:{base_afs_port}',
-            f'localhost:{base_afs_port + 1}',
-            f'localhost:{base_afs_port + 2}',
-        ]
-        print(f"[Worker {self.worker_id}] Connecting to AFS Raft cluster...")
+
+        if single_node:
+            self.afs_addresses = [f'localhost:{base_afs_port}']
+            print(f"[Worker {self.worker_id}] Connecting to AFS system (SINGLE_NODE mode)...")
+        else:
+            self.afs_addresses = [
+                f'localhost:{base_afs_port}',
+                f'localhost:{base_afs_port + 1}',
+                f'localhost:{base_afs_port + 2}',
+            ]
+            print(f"[Worker {self.worker_id}] Connecting to AFS Raft cluster...")
+            
         self.afs_stub = self._connect_to_primary()
         if not self.afs_stub:
             print(f"[Worker {self.worker_id}] Failed to connect to AFS cluster!")

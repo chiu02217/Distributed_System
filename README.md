@@ -101,10 +101,22 @@ python -m src.afs.worker.worker [worker_id] [coordinator_address] [file_server_a
 
 Example code for quick start: (must in separate terminal!)
 ```
-python -m src.afs_server.afs_server
+# single server start:
+SINGLE_MODE=true python -m src.afs_server.afs_server 0
+
+# primary-backup server start:
+python -m src.afs_server.afs_server 0
+python -m src.afs_server.afs_server 1
+python -m src.afs_server.afs_server 2
 
 python -m src.afs_coordinator.coordinator
 
+# single server - worker start:
+SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-1
+SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-2
+SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-3
+
+# primary-backup server - worker start:
 python -m src.worker.worker_client.worker_client worker-1
 python -m src.worker.worker_client.worker_client worker-2
 python -m src.worker.worker_client.worker_client worker-3

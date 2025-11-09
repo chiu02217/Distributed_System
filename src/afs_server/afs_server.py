@@ -1,5 +1,4 @@
 from concurrent import futures
-from pysyncobj import SyncObj, replicated
 import time
 import grpc
 import os
@@ -8,36 +7,8 @@ import threading
 from src.common.grpc.auto_generated import file_operation_message_pb2 as messages
 from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as service
 from src.common.config_loader import CONFIG
-
-class RaftStorage(SyncObj):
-    def __init__(self, self_address, other_server_addresses):
-        super().__init__(self_address, other_server_addresses)
-        self._data = {}
-
-    @replicated
-    def set(self, key, value):
-        self._data[key] = value
-
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-
-    @replicated
-    def delete(self, key):
-        if key in self._data:
-            del self._data[key]
-
-    def is_request_executed(self, request_id):
-        if not request_id:
-            return False
-        return f"req_{request_id}" in self._data
-
-    @replicated
-    def mark_request_executed(self, request_id, response_data):
-        if request_id:
-            self._data[f"req_{request_id}"] = response_data
-
-    def get_cached_response(self, request_id):
-        return self._data.get(f"req_{request_id}")
+from src.common.storage.simple_storage import SimpleStorage
+from src.common.storage.raft_storage import RaftStorage
 
 class FileOperationServiceServicer(service.FileOperationServiceServicer):
     def __init__(self, input_dir, output_dir, raft_storage):
@@ -343,32 +314,38 @@ def start_afs_server(node_id):
     
     input_dir = CONFIG.afs.input_dir
     output_dir = CONFIG.afs.output_dir
-    
-    self_address = f'localhost:{raft_port}'
-    partners = []
-    for i in range(3):
-        if i != node_id:
-            partner = f'localhost:{base_raft_port + i}'
-            partners.append(partner)
+   
+    single_node = os.getenv("SINGLE_NODE", "false").lower() == "true"
 
-    print(f"[AFS Server({node_id})] Initialize Raft...")
-    raft_storage = RaftStorage(self_address, partners)
-
-    timeout = 20
-    start = time.time()
-    while not raft_storage.isReady() and time.time() - start < timeout:
-        time.sleep(0.5)
-        print(".", end="", flush=True)
-    print()
-
-    if raft_storage.isReady():
-        leader = raft_storage._getLeader()
-        if leader:
-            print(f"[AFS Server({node_id})] Raft is ready! Current Leader: {leader.address}")
-        else:
-            print(f"[AFS Server({node_id})] Raft is ready! No leader yet")
+    if single_node:
+        print(f"[AFS Server({node_id})] Running in SINGLE NODE mode")
+        raft_storage = SimpleStorage()
     else:
-        print(f"[AFS Server({node_id})] Raft is not ready, but will continue to retry.")
+        self_address = f'localhost:{raft_port}'
+        partners = []
+        for i in range(3):
+            if i != node_id:
+                partner = f'localhost:{base_raft_port + i}'
+                partners.append(partner)
+
+        print(f"[AFS Server({node_id})] Initialize Raft...")
+        raft_storage = RaftStorage(self_address, partners)
+
+        timeout = 20
+        start = time.time()
+        while not raft_storage.isReady() and time.time() - start < timeout:
+            time.sleep(0.5)
+            print(".", end="", flush=True)
+        print()
+
+        if raft_storage.isReady():
+            leader = raft_storage._getLeader()
+            if leader:
+                print(f"[AFS Server({node_id})] Raft is ready! Current Leader: {leader.address}")
+            else:
+                print(f"[AFS Server({node_id})] Raft is ready! No leader yet")
+        else:
+            print(f"[AFS Server({node_id})] Raft is not ready, but will continue to retry.")
 
     max_workers = CONFIG.afs.can_handle_max_workers
     grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))

@@ -1,22 +1,19 @@
 {
-    "worker": 
-        {
-            "worker_snapshot_port": 9001,
-            "worker_snapshot_max_workers": 3
-        },
-    "afs":
-        {
-            "can_handle_max_workers": 5,
-            "afs_temp_path": "./afs/temp",
-            "server_address": "localhost:8000",
-            "port": 8000,
-            "input_dir": "./data/input",
-            "snapshot_dir": "./data/snapshot",
-            "output_dir": "./data/output"
-        },
-    "coordinator":
-        {
-            "coordinator_address": "localhost:50001",
-            "port": 50001
-        }
+    "worker": {
+        "worker_snapshot_port": 9001,
+        "worker_snapshot_max_workers": 3
+    },
+    "afs": {
+        "can_handle_max_workers": 5,
+        "afs_temp_path": "./afs/temp",
+        "server_address": "localhost:8000",
+        "port": 8000,
+        "input_dir": "./data/input",
+        "snapshot_dir": "./data/snapshots",
+        "output_dir": "./data/output"
+    },
+    "coordinator": {
+        "coordinator_address": "localhost:50001",
+        "port": 50001
+    }
 }

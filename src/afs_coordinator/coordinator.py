@@ -226,4 +226,69 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
             all_data = "\n".join(str(prime) for prime in sorted(self.all_primes))
 
             write_success = safe_call(
-                self.a
+                self.afs_client.write_file,
+                5, 2,
+                handle,
+                all_data
+            )
+            
+            if not write_success:
+                print(f"[Coordinator] Error writing to file {filename} in AFS.")
+                return
+            
+            print(f"[Coordinator] Saved {len(self.all_primes)} unique primes to {filename} in AFS.")
+            
+        except Exception as e:
+            print(f"[Coordinator] Exception while saving results to AFS: {e}")
+        
+        finally:
+            if handle is not None:
+                safe_call(
+                    self.afs_client.close_file,
+                    5, 2,
+                    handle
+                )
+                print(f"[Coordinator] Closed file {filename} in AFS.")
+
+    def Heartbeat(self, request: coordinator_messages.HeartbeatRequest, context):
+        worker_id = request.worker_id
+        self.last_heartbeat[worker_id] = time.time()
+        print(f"[Coordinator] Heartbeat received from {worker_id}")
+        return coordinator_messages.HeartbeatResponse(acknowledged=True) 
+    
+    def _monitor_heartbeats(self):
+        while not self.is_finished:
+            now = time.time()
+            for worker_id, last_seen in list(self.last_heartbeat.items()):
+                if now - last_seen > self.timeout_threshold:
+                    print(f"[Coordinator] Worker {worker_id} timed out")
+            time.sleep(2)
+
+def run_coordinator_server():
+    port = CONFIG.coordinator.port
+    coordinator_servicer = CoordinatorServicer()
+    coordinator_server = grpc.server(futures.ThreadPoolExecutor(max_workers=5))
+    coordinator_service.add_CoordinatorServiceServicer_to_server(
+        coordinator_servicer, coordinator_server
+    )
+    snapshot_service.add_SnapshotServiceServicer_to_server(
+        coordinator_servicer, coordinator_server
+    )
+    coordinator_server.add_insecure_port(f'[::]:{port}')
+    coordinator_server.start()
+    print(f"[Coordinator] Server started on port {port}")
+    
+    try:
+        while not coordinator_servicer.is_finished:
+            time.sleep(1)
+        print("[Coordinator] All tasks processed. Press Ctrl+C to stop the server.")
+        coordinator_server.wait_for_termination()
+    except KeyboardInterrupt:
+        print("[Coordinator] Shutting down server...")
+        if not coordinator_servicer.is_finished:
+            coordinator_servicer._save_results()
+            print("[Coordinator] Not all tasks were completed before shutdown.")
+        coordinator_server.stop(0)
+    
+if __name__ == '__main__':
+    run_coordinator_server()

@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package coordinator;
+
 message GetTaskRequest {
     string worker_id = 1;
 }

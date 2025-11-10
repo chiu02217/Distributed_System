@@ -75,7 +75,7 @@ AFS (Abstract File System) is a distributed file processing system that implemen
 ## Quick Start
 ### Install Dependencies
 ```bash
-pip install grpcio grpcio-tools
+pip install grpcio grpcio-tools pysyncobj
 ```
 ### Generate gRPC Files
 ```bash
@@ -86,34 +86,24 @@ pip install grpcio grpcio-tools
 scripts\compile_proto.bat
 ```
 ### Run
-Start each component in a separate terminal:
-```
-# Terminal 1: Start AFS Server
-python -m src.afs.server.server [input_dir] [output_dir] [port]
-or
-python src/afs/server/afs_server.py
-(depend on your pc settings)
-
-
-# Terminal 2: Start Coordinator
-python -m src.afs.coordinator.coordinator [input_dir] [afs_server_address] [port]
-or
-python src/afs/coordinator/coordinator_server.py
-(depend on your pc settings)
-
-# Terminal 3-5: Start Workers
-python -m src.app.worker.worker_client.worker_client [worker_id] [coordinator_address] [file_server_address] [cache_dir]
-or (example)
-python src/app/worker/worker_client/worker_client.py  worker-1
-(depend on your pc settings)
-```
-
 Example code for quick start: (must in separate terminal!)
 ```
-python -m src.afs_server.afs_server
+# single server start:
+SINGLE_MODE=true python -m src.afs_server.afs_server 0
+
+# primary-backup server start:
+python -m src.afs_server.afs_server 0
+python -m src.afs_server.afs_server 1
+python -m src.afs_server.afs_server 2
 
 python -m src.afs_coordinator.coordinator
 
+# single server - worker start:
+SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-1
+SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-2
+SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-3
+
+# primary-backup server - worker start:
 python -m src.worker.worker_client.worker_client worker-1
 python -m src.worker.worker_client.worker_client worker-2
 python -m src.worker.worker_client.worker_client worker-3
@@ -124,3 +114,4 @@ The AFS system follows a distributed computing pattern with the following compon
 ### AFS Client
 ### Coordinator
 ### Worker
+

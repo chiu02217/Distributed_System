@@ -7,7 +7,6 @@ import sys
 import uuid
 from queue import Queue
 import threading
-from src.afs_client.afs_client import AFSClient
 from src.common.grpc.auto_generated import file_operation_message_pb2 as afs_messages
 from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as afs_service
 from src.common.grpc.auto_generated import coordinator_message_pb2 as coordinator_messages
@@ -16,8 +15,6 @@ from src.common.grpc.auto_generated import snapshot_message_pb2 as snapshot_mess
 from src.common.grpc.auto_generated import snapshot_service_pb2_grpc as snapshot_service
 from src.afs_coordinator.snapshot.coordinator_snapshot import CoordinatorSnapshotHandler
 from src.common.config_loader import CONFIG
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def safe_call(func, max_retries=3, delay=1, *args, **kwargs):
     """
@@ -68,35 +65,17 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         self.worker_stubs = {}  # {worker_id: grpc stub}
         self.is_finished = False
         
-        # task management
-        self.total_tasks = 0
-        self.completed_tasks = 0
-        
-        # higher cache size for grpc
-        grpc_options = [
-            ('grpc.max_receive_message_length', 100 * 1024 * 1024),
-            ('grpc.max_send_message_length', 100 * 1024 * 1024)  
-        ]
-
-        # AFS connection setup
         afs_server_address = CONFIG.afs.server_address
-        relative_cache_path = CONFIG.afs.afs_temp_path
-        base_cache_dir = os.path.normpath(os.path.join(PROJECT_ROOT, relative_cache_path))
-        coordinator_cache_dir = os.path.join(base_cache_dir, "coordinator")
-
-        afs_channel = grpc.insecure_channel(afs_server_address, options=grpc_options)
-        self.afs_client = AFSClient(channel=afs_channel, cache_dir=coordinator_cache_dir)
-
         print(f"[Coordinator] Connecting to AFS at {afs_server_address}...")
         
-        # snapshot manager
-        self.snapshot_manager = CoordinatorSnapshotHandler(self)
-        
-        # check for existing snapshots and recover state if found
-        recovered = self.snapshot_manager.recover_from_snapshot()
-        if not recovered:
-            print("[Coordinator] No snapshot found. Starting fresh.")
+        try:
+            channel = grpc.insecure_channel(afs_server_address)
+            self.afs_stub = afs_service.FileOperationServiceStub(channel)
             self._load_tasks_from_afs()
+            print(f"[Coordinator] Connected to AFS server at {afs_server_address}")
+        except Exception as e:
+            print(f"[Coordinator] Failed to connect to AFS server: {e}")
+            sys.exit(1)
         
         # handle heartbeat logs
         self.last_heartbeat = {}
@@ -105,27 +84,28 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         
         print(f"[Coordinator] Loaded tasks from AFS.")
 
-        # start snapshot thread
-        self.snapshot_manager.start_snapshot_thread()
+        # snapshot manager
+        # self.snapshot_manager = CoordinatorSnapshotHandler(self)
+        # self.snapshot_manager.start_snapshot_thread()
 
      
     def _load_tasks_from_afs(self):
-        filenames = safe_call(self.afs_client.list_files, 
-                              max_retries=5, 
-                              delay=2,
-                              path="inputs")
-
-        if filenames is None:
+        list_file_request = afs_messages.ListFilesRequest()
+        response = safe_call(self.afs_stub.ListFiles(list_file_request), max_retries=5, delay=2, request=list_file_request)
+        
+        if response is None:
             print("[Coordinator] Error listing files from AFS after retries.")
             raise Exception("Failed to list files from AFS.")
-
-        for filename in filenames:
-            # Filter files with 'input_dataset_' prefix
-            if filename.startswith("input_dataset_"):
-                self.task_queue.put(filename)
-                self.total_tasks += 1
         
-        print(f"[Coordinator] Successfully loaded {len(filenames)} tasks from AFS")
+        if response.error:
+            print(f"[Coordinator] Error listing files from AFS: {response.error}")
+            return
+        
+        for filename in response.filenames:
+            self.task_queue.put(filename)
+        
+        print(f"[Coordinator] Successfully loaded {len(response.filenames)} tasks from AFS")
+
 
     def GetTask(self, request, context):
         """
@@ -174,7 +154,6 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         1. Update the set of all primes with the primes received from the worker.
         2. Remove the task from assigned_tasks.
         """
-        self.snapshot_manager.process_result_from_worker(request)
         # logic 1: update primes set
         with self.primes_lock:
             self.all_primes.update(request.primes)
@@ -207,23 +186,107 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
                 print(f"[Coordinator] Worker {worker_id} re-registered.")
 
         return snapshot_messages.RegisterWorkerIdResponse(success=True)
-
+        
     def _save_results(self):
+        """
+        Save the collected unique primes to 'primes.txt' in AFS.
+        """
         filename = 'primes.txt'
-        handle = None
+        file_handle = None
         
         try:
-            handle = safe_call(
-                self.afs_client.create_file, 
-                3, 1, 
-                filename
+            # Create the file in AFS
+            create_request = afs_messages.CreateFileRequest(
+                filename=filename,
+                request_id=f"coordinator-create-{filename}"
             )
             
-            if handle is None:
-                print(f"[Coordinator] Error creating file {filename} in AFS.")
+            create_response = safe_call(self.afs_stub.CreateFile,3,1,create_request)
+            
+            if create_response is None or create_response.error:
+                print(f"[Coordinator] Error creating file {filename} in AFS: {create_response.error if create_response else 'No response'}")
                 return
             
+            file_handle = create_response.handle
+            print(f"[Coordinator] Created file {filename} in AFS with handle {file_handle}")
+
+            # Write primes to the created file
             all_data = "\n".join(str(prime) for prime in sorted(self.all_primes))
 
-            write_success = safe_call(
-                self.a
+            def write_file():
+                write_request = afs_messages.WriteFileRequest(
+                    handle=file_handle,
+                    content="\n".join(str(prime) for prime in sorted(self.all_primes)).encode('utf-8'),
+                    request_id = f"coordinator-{uuid.uuid4()}"  # unique request ID
+                )
+                return self.afs_stub.WriteFile(write_request)
+            
+            write_response = safe_call(write_file, max_retries=5, delay=2)
+            
+            if hasattr(write_response, 'error') and write_response.error:
+                print(f"[Coordinator] Error writing to file {filename} in AFS: {write_response.error if write_response else 'No response'}")
+                return
+            
+            print(f"[Coordinator] Saved {len(self.all_primes)} unique primes to {filename} in AFS.")
+            
+        except Exception as e:
+            print(f"[Coordinator] Exception while saving results to AFS: {e}")
+        
+        finally:
+            if file_handle is not None:
+                def close_file():
+                    close_request = afs_messages.CloseFileRequest(
+                        handle=file_handle,
+                        request_id = f"coordinator-{uuid.uuid4()}"
+                    )
+                    return self.afs_stub.CloseFile(close_request)
+                
+                close_response = safe_call(close_file, max_retries=5, delay=2)
+                
+                if close_response is None or close_response.error:
+                    print(f"[Coordinator] Error closing file {filename} in AFS: {close_response.error if close_response else 'No response'}")
+                else:
+                    print(f"[Coordinator] Closed file {filename} in AFS.")
+       
+    def Heartbeat(self, request, context):
+        worker_id = request.worker_id
+        self.last_heartbeat[worker_id] = time.time()
+        print(f"[Coordinator] Heartbeat received from {worker_id}")
+        return coordinator_messages.HeartbeatResponse(acknowledged=True) 
+    
+    def _monitor_heartbeats(self):
+        while not self.is_finished:
+            now = time.time()
+            for worker_id, last_seen in list(self.last_heartbeat.items()):
+                if now - last_seen > self.timeout_threshold:
+                    print(f"[Coordinator] Worker {worker_id} timed out")
+            time.sleep(2)
+
+def run_coordinator_server():
+    port = CONFIG.coordinator.port
+    coordinator_servicer = CoordinatorServicer()
+    coordinator_server = grpc.server(futures.ThreadPoolExecutor(max_workers=5))
+    coordinator_service.add_CoordinatorServiceServicer_to_server(
+        coordinator_servicer, coordinator_server
+    )
+    snapshot_service.add_SnapshotServiceServicer_to_server(
+        coordinator_servicer, coordinator_server
+    )
+    coordinator_server.add_insecure_port(f'[::]:{port}')
+    coordinator_server.start()
+    print(f"[Coordinator] Server started on port {port}")
+    
+    try:
+        while not coordinator_servicer.is_finished:
+            time.sleep(1)
+        print("[Coordinator] All tasks processed. Press Ctrl+C to stop the server.")
+        coordinator_server.wait_for_termination()
+    except KeyboardInterrupt:
+        print("[Coordinator] Shutting down server...")
+        if not coordinator_servicer.is_finished:
+            coordinator_servicer._save_results()
+            print("[Coordinator] Not all tasks were completed before shutdown.")
+        coordinator_server.stop(0)
+    
+if __name__ == '__main__':
+    run_coordinator_server()

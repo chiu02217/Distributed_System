@@ -81,6 +81,7 @@ class AFSClient(IAFSClient):
         file_info = self.open_files[handle]
         
         try:
+            print(f"[AFSClient] Writing to cache: {handle}") 
             line = str(data) + '\n'
             file_info['file_obj'].write(line.encode('utf-8'))
             file_info['file_obj'].flush()
@@ -95,7 +96,7 @@ class AFSClient(IAFSClient):
     def read_file(self, handle):
         if handle not in self.open_files:
             print(f" Error reading file: {handle}")
-            return None
+            return "SERVER_ERROR"
 
         file_info = self.open_files[handle]
        
@@ -106,7 +107,7 @@ class AFSClient(IAFSClient):
 
                 if read_response.error:
                     print(f"Error reading file from server: {read_response.error}")
-                    return None
+                    return "SERVER_ERROR"
                 
                 with open(file_info['path'], 'wb') as f:
                     f.write(read_response.content)
@@ -115,7 +116,7 @@ class AFSClient(IAFSClient):
 
             except Exception as e:
                 print(f"Error during remote read_file: {e}")
-                return None
+                return "SERVER_ERROR"
         
         try:
             line = file_info['file_obj'].readline()
@@ -131,7 +132,7 @@ class AFSClient(IAFSClient):
             
         except Exception as e:
             print(f"Error during read_file: {e}")
-            return None
+            return "SERVER_ERROR"
     
     def close_file(self, handle):
         if handle not in self.open_files:

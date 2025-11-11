@@ -10,6 +10,7 @@ from src.common.config_loader import CONFIG
 from src.common.storage.simple_storage import SimpleStorage
 from src.common.storage.raft_storage import RaftStorage
 
+
 # for test relative path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -130,6 +131,9 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
                 response.error = f"Invalid handle: {request.handle}"
                 return response
             
+
+            print(f"[AFS Server] Reading file: {handle_info['filename']}")
+
             with open(handle_info['path'], 'rb') as f:
                 response.content = f.read()
             
@@ -362,9 +366,9 @@ def start_afs_server(node_id):
     snapshot_dir = CONFIG.afs.snapshot_dir
     
     # Convert to absolute paths
-    abs_input_dir = os.path.join(PROJECT_ROOT, input_dir)
-    abs_output_dir = os.path.join(PROJECT_ROOT, output_dir)
-    abs_snapshot_dir = os.path.join(PROJECT_ROOT, snapshot_dir)
+    abs_input_dir = os.path.normpath(os.path.join(PROJECT_ROOT, input_dir))
+    abs_output_dir = os.path.normpath(os.path.join(PROJECT_ROOT, output_dir))
+    abs_snapshot_dir = os.path.normpath(os.path.join(PROJECT_ROOT, snapshot_dir))
     
     single_mode = os.getenv("SINGLE_MODE", "false").lower() == "true"
 
@@ -430,4 +434,13 @@ if __name__ == '__main__':
         print("Usage: python afs_server.py <node_id>")
         sys.exit(1)
     node_id = int(sys.argv[1])
+
+
+    #demo arguments
+    if len(sys.argv) >= 3:
+        CONFIG.afs.input_dir = sys.argv[2]
+    if len(sys.argv) >= 4:
+        CONFIG.afs.output_dir = sys.argv[3]
+    if len(sys.argv) >= 5:
+        CONFIG.afs.snapshot_dir = sys.argv[4]
     start_afs_server(node_id)

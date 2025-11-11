@@ -307,8 +307,12 @@ class Worker(IWorker):
                 # Load and process file line by line
                 while True:
                     number_str = self.afs_client.read_file(file_handle)
+                    if number_str == "SERVER_ERROR":
+                        print(f"[Worker {self.worker_id}] Error: Could not read file {filename}")
+                        return False
+
                     if number_str is None:
-                        break 
+                        break
 
                     # Update snapshot current line number
                     with self.state_lock:

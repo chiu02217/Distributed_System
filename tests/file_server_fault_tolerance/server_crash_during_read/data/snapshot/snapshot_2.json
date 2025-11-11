@@ -1,0 +1,9 @@
+{
+  "to_do_tasks": [],
+  "in_progress_tasks": {
+    "worker-1": "input_dataset_big.txt"
+  },
+  "total_tasks": 1,
+  "completed_tasks": 0,
+  "temp_primes": []
+}

@@ -174,6 +174,7 @@ class AFSClient(IAFSClient):
     
     # can specify directory
     def list_files(self, path: str):
+        # only these 3 paths are valid(for inputs, snapshot, and the final results)
         if path not in ("inputs", "snapshots", "outputs"):
             print(f"[AFSClient] Error: '{path}' not a valid logical path.")
             return None
@@ -197,85 +198,101 @@ class AFSClient(IAFSClient):
     def find_latest_coordinator_snapshot(self):
         print("finding latest coordinator snapshot...")
         try:
-            # use existing list_files method to get snapshot files
-            all_files = self.list_files(path="snapshots")
-            if all_files is None:
-                print("Error: list_files() failed")
+            # using existing list_files method to get snapshot files
+            all_coor_snapshot_files = self.list_files(path="snapshots")
+            if all_coor_snapshot_files is None:
+                print("find latest coor snapshot Error: no file or listFiles() failed")
                 return None
 
-            snapshot_files = []
+            coor_snapshot_files = []
             
             #  according to naming convention "snapshot_<ID>.json"
-            for f in all_files:
-                match = re.match(r'^snapshot_(\d+)\.json$', f)
-                if match:
-                    snapshot_id = int(match.group(1))
-                    snapshot_files.append((snapshot_id, f))
+            # be careful when changing it
+            for f in all_coor_snapshot_files:
+                coor_snapshot_regex = re.match(r'^snapshot_(\d+)\.json$', f)
+                if coor_snapshot_regex:
+                    valid_snapshot_id = int(coor_snapshot_regex.group(1))
+                    coor_snapshot_files.append((valid_snapshot_id, f))
             
-            if not snapshot_files:
+            if not coor_snapshot_files:
                 print("Error: No coordinator snapshots found.")
                 return None
                 
-            # 3. NUM sort files by snapshot_id in descending order
-            snapshot_files.sort(key=lambda x: x[0], reverse=True)
+            # sort files by snapshot_id in descending order, so the latest is the fist element
+            coor_snapshot_files.sort(key=lambda x: x[0], reverse=True)
             
-            latest_file = snapshot_files[0][1] 
-            print(f"find {latest_file}")
-            return latest_file
+            latest_coor_snapshot_file = coor_snapshot_files[0][1] 
+            print(f"find {latest_coor_snapshot_file}")
+            return latest_coor_snapshot_file
 
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"error when finding latest snapshot for coor: {e}")
             return None
     
     # read json file (for snapshot)
-    def read_json_file(self, handle):
-        if handle not in self.open_files:
-            print(f"[AFS] Error: Invalid file handle for read_entire_file: {handle}")
+    def read_json_file(self, open_file):
+        if open_file not in self.open_files:
+            print(f"[AFS] Error: Invalid file : {open_file}, you must pass the response of Openfiles()")
             return None
 
-        file_info = self.open_files[handle]
+        file_obj = self.open_files[open_file]
         
         try:
+            if file_obj['file_obj'] is None:
+                try:
+                    read_request = messages.ReadFileRequest(handle=open_file)
+                    read_response:messages.ReadFileResponse = self.stub.ReadFile(read_request)
+                    if read_response.error:
+                        print(f"read_json_file() Error reading file from server: {read_response.error}")
+                        return None
+                    with open(file_obj['path'], 'wb') as f:
+                        f.write(read_response.content)
+
+                    # open local cache
+                    file_obj['file_obj'] = open(file_obj['path'], 'rb')
+                except Exception as e:
+                    print(f"read json file error: {e}")
+
             # Reset file pointer to the beginning
-            file_info['file_obj'].seek(0)
-            content = file_info['file_obj'].read()
-            return content
+            file_obj['file_obj'].seek(0)
+            file_content = file_obj['file_obj'].read()
+            return file_content
             
         except Exception as e:
-            print(f"[AFS] Error reading entire file from cache: {e}")
+            print(f"read_json_file Error: {e}")
             return None
     
     # as title say
     def find_latest_worker_snapshot(self, worker_id: str):
-        print(f"[AFSClient] is searching snapshot for {worker_id} ...")
+        print(f"[AFS]  searching snapshot for {worker_id} ...")
         try:
-            # 1. 呼叫您現有的 ListFiles RPC
-            all_files = self.list_files(path="snapshots")
-            if all_files is None:
-                print("[AFSClient] error ")
+            # using ListFiles RPC
+            all_worker_snpashots = self.list_files(path="snapshots")
+            if all_worker_snpashots is None:
+                print("find latest worker snapshot Error: no file or listFiles() failed")
                 return None
 
-            snapshot_files = []
+            found_worker_snapshot_files = []
             
-            # prefix find
-            regex_pattern = re.compile(f"^snapshot_worker_{re.escape(worker_id)}_(\d+)\.json$")
+            # worker file regex
+            worker_snapshot_regex = re.compile(f"^snapshot_worker_{re.escape(worker_id)}_(\d+)\.json$")
             
-            for f in all_files:
-                match = regex_pattern.match(f)
+            for worker_snapshot in all_worker_snpashots:
+                match = worker_snapshot_regex.match(worker_snapshot)
                 if match:
                     snapshot_id = int(match.group(1)) 
-                    snapshot_files.append((snapshot_id, f))
+                    found_worker_snapshot_files.append((snapshot_id, worker_snapshot))
             
-            if not snapshot_files:
-                print(f"[AFSClient] cannot find snapshot for {worker_id}")
+            if not found_worker_snapshot_files:
+                print(f"No snapshot found for {worker_id}")
                 return None
-                
-            snapshot_files.sort(key=lambda x: x[0], reverse=True)
+            # same logic as find latest snapshot for coor
+            found_worker_snapshot_files.sort(key=lambda x: x[0], reverse=True)
             # get filename
-            latest_file = snapshot_files[0][1] 
-            print(f"[AFSClient] get the latest snapshot for {worker_id}: {latest_file}")
-            return latest_file
+            latest_worker_file = found_worker_snapshot_files[0][1] 
+            print(f"find the latest snapshot for {worker_id}: {latest_worker_file}")
+            return latest_worker_file
 
         except Exception as e:
-            print(f"[AFSClient] error when finding latest snapshot for worker: {e}")
+            print(f"error when finding latest snapshot for worker: {e}")
             return None

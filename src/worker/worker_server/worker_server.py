@@ -12,7 +12,8 @@ class _SnapshotServicer(snapshot_service.SnapshotServiceServicer):
         self.trigger_snapshot_callback = trigger_snapshot_callback
 
     # GRPC
-    def TriggerSnapshot(self, request, context):
+    # coordinator must use it to trigger worker individual snapshot(local)
+    def TriggerSnapshot(self, request:messages.TriggerSnapshotRequest, context):
         self.trigger_snapshot_callback(request.snapshot_id)
         
         return messages.TriggerSnapshotResponse(success=True)
@@ -23,5 +24,5 @@ def run_worker_server(trigger_snapshot_callback, port: int, max_workers: int = C
     snapshot_service.add_SnapshotServiceServicer_to_server(servicer, server)
     server.add_insecure_port(f"[::]:{port}")
     server.start()
-    print(f"[WorkerServer] starting, port : {port}...")
+    print(f"[Worker Server] starting at port : {port}...")
     return server

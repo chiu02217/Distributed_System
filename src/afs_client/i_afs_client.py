@@ -102,21 +102,12 @@ class IAFSClient(ABC):
         Find the latest coordinator snapshot file in AFS.
 
         Returns:
-            str: The filename of the latest snapshot, or None if not found.
+            str | None : The filename of the latest snapshot, or None if not found.
         """
         pass
 
     @abstractmethod
-    def read_json_file(self, handle):
-        """
-        Read the entire content of a JSON file from AFS.
-
-        Args:
-            handle: The handle of the JSON file to read.
-
-        Returns:
-            dict: The content of the JSON file, or None if not found.
-        """
+    def read_json_file(self, open_file):
         pass
 
     @abstractmethod

@@ -25,17 +25,17 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
     # backeground thread(trigger snapshot periodically)
     def start_snapshot_thread(self):
         print("[Snapshot] Starting snapshot thread...")
-        thread = threading.Thread(target=self.snapshot_loop, daemon=True)
+        thread = threading.Thread(target=self.global_snapshot_loop, daemon=True)
         thread.start()
 
     # every 30s take a snapshot
-    def snapshot_loop(self):
+    def global_snapshot_loop(self):
         while True:
             time.sleep(SNAPSHOT_FREQUENCY_SECONDS)
-            self.initiate_snapshot()
+            self.initiate_coor_snapshot()
 
     # Chandy Lamport
-    def initiate_snapshot(self):
+    def initiate_coor_snapshot(self):
         # id from 1
         self.current_snapshot_id += 1
         snapshot_id = self.current_snapshot_id
@@ -54,61 +54,35 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
         with self.coordinator.primes_lock:
             coord_state["temp_primes"] = list(self.coordinator.all_primes)
 
-        # store so far state to AFS in json format
-        state_filename = f"snapshot_{snapshot_id}.json"
-        self.save_state_to_afs(state_filename, coord_state)
+        # store coordinator snpashot to AFS in json format
+        coordinator_snapshot_filename = f"snapshot_{snapshot_id}.json"
+        self.save_coor_snapshot_to_afs(coordinator_snapshot_filename, coord_state)
         
         # get worker list
-        workers = self.get_all_worker_ids()
+        workers_ids = self.get_all_worker_ids()
         self.snapshot_state[snapshot_id] = {
-            "coordinator_state_saved": True,
-            "channels_to_record": workers.copy(),
-            "channel_messages": {worker_id: [] for worker_id in workers}
+            "coordinator_state_saved_or_not": True,
+            "worker_channels": workers_ids.copy(),
+            "channel_messages": {worker_id: [] for worker_id in workers_ids}
         }
 
         # already sent to all Worker (在下次 GetTask 時)
         print(f"[Snapshot] Coordinator state saved for snapshot {snapshot_id}.")
-        # --- 3. *** 關鍵修正：主動發送標記 *** ---
-        #print(f"[SnapshotManager] 正在向 {len(workers)} 個 Worker 主動發送標記 {snapshot_id}...")
-        #failed_workers = []
 
         # ensure snapshot lock exists
         if not hasattr(self, "_snapshot_lock"):
             self._snapshot_lock = threading.Lock()
 
         with self.coordinator.worker_regis_lock:
-            for worker_id, stub in self.coordinator.worker_stubs.items():
+            for worker_id, coordinator_stub in self.coordinator.worker_stubs.items():
                 # only send to currently known workers
-                if worker_id in workers:
+                if worker_id in workers_ids:
                     try:
                         # call TriggerSnapshot RPC on Worker server
-                        req = snapshot_messages.TriggerSnapshotRequest(snapshot_id=snapshot_id)
-                        stub.TriggerSnapshot(req)
+                        trigger_snapshot_req = snapshot_messages.TriggerSnapshotRequest(snapshot_id=snapshot_id)
+                        coordinator_stub.TriggerSnapshot(trigger_snapshot_req)
                     except Exception as e:
-                        print(f"[SnapshotManager] Failed to send marker to {worker_id}: {e}")
-                        # record failed worker
-                        #failed_workers.append(worker_id)
-
-        # handle failed workers outside the registration lock
-        # if failed_workers:
-        #     print(f"[SnapshotManager] Handling {len(failed_workers)} unresponsive workers...")
-        #     with self._snapshot_lock:
-        #         if snapshot_id in self.snapshot_state:
-        #             state_data = self.snapshot_state[snapshot_id]
-        #             for worker_id in failed_workers:
-        #                 # Chandy-Lamport crash handling: pretend we received the marker
-        #                 if worker_id in state_data.get("channels_to_record", []):
-        #                     state_data["channels_to_record"].remove(worker_id)
-        #                     print(f"[SnapshotManager] Treating {worker_id} as crashed; stop recording its channel.")
-        #                     # channel messages list is empty for crashed worker (or existing recorded msgs)
-        #                     msgs = state_data.get("channel_messages", {}).get(worker_id, [])
-        #                     channel_filename = f"snapshot_channel_W-C_{worker_id}_{snapshot_id}.json"
-        #                     self.save_state_to_afs(channel_filename, msgs)
-
-        #             # check if snapshot is now complete
-        #             if not state_data.get("channels_to_record"):
-        #                 print(f"[SnapshotManager] --- Global Snapshot {snapshot_id} COMPLETED (worker crash) ---")
-        #                 del self.snapshot_state[snapshot_id]
+                        print(f"[Snapshot] Failed to send marker to {worker_id}: {e}")
 
     # send snapshot_id to worker
     def send_snapshot_id_to_worker(self, response: messages.GetTaskResponse):
@@ -120,69 +94,72 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
     # b. Record in-flight messages
     def process_result_from_worker(self, request: messages.SubmitResultRequest):
         worker_id = request.worker_id
-        incoming_snapshot_id = getattr(request, "snapshot_id", None)
-        filename = getattr(request, "filename", None)
+        # get snpshot id when worker submitResult
+        incoming_snapshot_id_from_worker = getattr(request, "snapshot_id", None)
+        # get worker completed filename's content
+        filename_from_worker = getattr(request, "filename", None)
 
         # ensure a lock for snapshot_state exists
         if not hasattr(self, "_snapshot_lock"):
             self._snapshot_lock = threading.Lock()
 
+        # lock needed because multiple worker might call this function simultanously
         with self._snapshot_lock:
-            # If snapshot not active, ignore
-            if incoming_snapshot_id not in self.snapshot_state:
+            # If worker's snapshot_id is not we are following(old or...) then ignore and return 
+            if incoming_snapshot_id_from_worker not in self.snapshot_state:
                 return
-
-            state_data: dict = self.snapshot_state[incoming_snapshot_id]
+            # accoring to worker's snapshot id, get according snapshot coordinator state
+            inflight_state_data: dict = self.snapshot_state[incoming_snapshot_id_from_worker]
 
             # Receiver rule: first marker from this worker for this snapshot
-            if worker_id in state_data.get("channels_to_record", []):
-                state_data["channels_to_record"].remove(worker_id)
-                print(f"[Snapshot] Received snapshot {incoming_snapshot_id} from {worker_id}.")
+            if worker_id in inflight_state_data.get("worker_channels", []):
+                # if this is the forst time what we got from worker, then delete it from waiting list
+                inflight_state_data["worker_channels"].remove(worker_id)
+                print(f"[Snapshot] Received snapshot {incoming_snapshot_id_from_worker} from {worker_id}.")
 
-                # persist recorded in-flight messages for this channel
-                msgs = state_data.get("channel_messages", {}).get(worker_id, [])
-                channel_filename = f"snapshot_channel_{worker_id}_{incoming_snapshot_id}.json"
-                self.save_state_to_afs(channel_filename, msgs)
+                # store in-flight messages
+                channel_msgs = inflight_state_data.get("channel_messages", {}).get(worker_id, [])
+                # a file for storing the in-flight messages
+                channel_filename = f"snapshot_channel_{worker_id}_{incoming_snapshot_id_from_worker}.json"
+                self.save_coor_snapshot_to_afs(channel_filename, channel_msgs)
 
-                # if all channels done, finalize snapshot
-                if not state_data.get("channels_to_record"):
-                    print(f"[Snapshot] Global Snapshot {incoming_snapshot_id} COMPLETED ---")
-                    # remove snapshot entry
-                    del self.snapshot_state[incoming_snapshot_id]
+                # if all channels done, means that snapshot is done
+                if not inflight_state_data.get("worker_channels"):
+                    print(f"[Snapshot] Global Snapshot {incoming_snapshot_id_from_worker} COMPLETED ---")
+                    # remove this snapshot state from mem 
+                    del self.snapshot_state[incoming_snapshot_id_from_worker]
+            # iterate all in-progressing coor snapshot
+            for snapshot_id, channel_data in list(self.snapshot_state.items()):
+                # ensure channel_messages &channel_messages structure exists
+                channel_data.setdefault("channel_messages", {})
+                channel_data["channel_messages"].setdefault(worker_id, [])
 
-            # Record in-flight messages for any active snapshots where this channel is still being recorded.
-            # Iterate over a static list to avoid mutation issues.
-            for snapshot_id, data in list(self.snapshot_state.items()):
-                # ensure channel_messages structure exists
-                data.setdefault("channel_messages", {})
-                data["channel_messages"].setdefault(worker_id, [])
-
-                # If this snapshot is still recording this channel and the incoming marker id
-                # indicates this message should be considered in-flight, append it.
-                # (Keeps original comparison logic: incoming_snapshot_id < snapshot_id)
-                if worker_id in data.get("channels_to_record", []) and incoming_snapshot_id < snapshot_id:
+                # If this snapshot is still recording this worker_channel and the incoming marker id
+                # If this incoming_snapshot_id, earlier than the id we are processing now
+                # If both yes, then this is a in-flight_messages
+                if worker_id in channel_data.get("worker_channels", []) and incoming_snapshot_id_from_worker < snapshot_id:
                     print(f"[Snapshot] Recording in-flight message from {worker_id} for snapshot {snapshot_id}")
-                    if filename is not None:
-                        data["channel_messages"][worker_id].append(filename)
+                    if filename_from_worker is not None:
+                        channel_data["channel_messages"][worker_id].append(filename_from_worker)
 
 
-    def save_state_to_afs(self, filename, state_data):
-        handle = self.afs_client.create_file(filename)
-        if handle is None:
-            print(f"[Snapshot] AFS Error: Could not create snapshot file {filename}")
+    def save_coor_snapshot_to_afs(self, filename, state_data):
+        create_success_or_not = self.afs_client.create_file(filename)
+        if create_success_or_not is None:
+            print(f"[Snapshot] AFS Error: Could not create coordinator snapshot file {filename}")
             return
 
         try:
-            data_str = json.dumps(state_data, indent=2)
+            raw_data = json.dumps(state_data, indent=2)
             # write in chunks if too large
-            for i in range(0, len(data_str), 1024):
-                chunk = data_str[i:i+1024]
-                self.afs_client.write_file(handle, chunk)
+            for i in range(0, len(raw_data), 1024):
+                data_chunk = raw_data[i:i+1024]
+                self.afs_client.write_file(create_success_or_not, data_chunk)
         except Exception as e:
-            print(f"[Snapshot] Error writing snapshot data: {e}")
+            print(f"[Snapshot] Error writing coordinator snapshot data: {e}")
         finally:
-            self.afs_client.close_file(handle)
-            print(f"[Snapshot] Saved state to {filename}")
+            self.afs_client.close_file(create_success_or_not)
+            print(f"[Snapshot] Saved coordinator state to {filename}")
             
 
     # get all registered worker ids        
@@ -192,46 +169,45 @@ class CoordinatorSnapshotHandler(ICoordinatorSnapshotHandler):
         
 
     # recover from snapshot at startup
-    def recover_from_snapshot(self):
+    def coor_recover_from_snapshot(self):
         print("[Coordinator] Checking for existing coordinator snapshots...")
         try:
             # Find the latest coordinator snapshot file in AFS.
             latest_snapshot_file = self.afs_client.find_latest_coordinator_snapshot()
             # if no snapshot file
             if latest_snapshot_file is None:
-                print("[Coordinator] No existing snapshot found.")
+                print("[Coordinator] No existing coordinator snapshot found.")
                 return False
             print(f"[Coordinator] Found snapshot '{latest_snapshot_file}'. Recovering state...")
 
             # Read the snapshot file from AFS.
-            handle = self.afs_client.open_file(latest_snapshot_file)
-            state_data = self.afs_client.read_json_file(handle)
-            self.afs_client.close_file(handle)
-            state = json.loads(state_data)
+            coor_snapshot = self.afs_client.open_file(latest_snapshot_file)
+            coor_state_data = self.afs_client.read_json_file(coor_snapshot)
+            self.afs_client.close_file(coor_snapshot)
+            coor_snapshot_json_data = json.loads(coor_state_data)
 
             # Restore task-related state.
             with self.coordinator.task_lock:
-                for task in state.get("to_do_tasks", []):
+                for task in coor_snapshot_json_data.get("to_do_tasks", []):
                     self.coordinator.task_queue.put(task)
 
                 # Any in-progress tasks should be re-queued so workers can pick them up.
-                self.coordinator.assigned_tasks = state.get("in_progress_tasks", {})
+                self.coordinator.assigned_tasks = coor_snapshot_json_data.get("in_progress_tasks", {})
                 for task in self.coordinator.assigned_tasks.values():
                     self.coordinator.task_queue.put(task)
-                # Restore counters.
-                self.coordinator.total_tasks = state.get("total_tasks", 0)
-                self.coordinator.completed_tasks = state.get("completed_tasks", 0)
+                self.coordinator.total_tasks = coor_snapshot_json_data.get("total_tasks", 0)
+                self.coordinator.completed_tasks = coor_snapshot_json_data.get("completed_tasks", 0)
 
-                # Clear assigned_tasks because they were re-queued for reassignment.
+                # because crash so u have to reassign those asssigned tasks 
                 self.coordinator.assigned_tasks = {}
 
             # Restore temporary primes set.
             with self.coordinator.primes_lock:
-                self.coordinator.all_primes = set(state.get("temp_primes", []))
+                self.coordinator.all_primes = set(coor_snapshot_json_data.get("temp_primes", []))
 
-            print("[Coordinator] State recovery complete.")
+            print("[Coordinator] Coordinator State recovery complete.")
             return True
 
         except Exception as e:
-            print(f"[Coordinator] Failed to load snapshot: {e}. Starting fresh.")
+            print(f"[Coordinator] Failed to load coordinator snapshot: {e}. Starting from begin")
             return False

@@ -93,7 +93,7 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         self.snapshot_manager = CoordinatorSnapshotHandler(self)
         
         # check for existing snapshots and recover state if found
-        recovered = self.snapshot_manager.recover_from_snapshot()
+        recovered = self.snapshot_manager.coor_recover_from_snapshot()
         if not recovered:
             print("[Coordinator] No snapshot found. Starting fresh.")
             self._load_tasks_from_afs()
@@ -108,24 +108,25 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         # start snapshot thread
         self.snapshot_manager.start_snapshot_thread()
 
-     
+    # load files(tasks) from afs
+    # using new safe_call
     def _load_tasks_from_afs(self):
-        filenames = safe_call(self.afs_client.list_files, 
+        todo_tasks = safe_call(self.afs_client.list_files, 
                               max_retries=5, 
                               delay=2,
                               path="inputs")
 
-        if filenames is None:
-            print("[Coordinator] Error listing files from AFS after retries.")
-            raise Exception("Failed to list files from AFS.")
+        if todo_tasks is None:
+            print("[Coordinator] No tasks or error loading files from AFS after retries.")
 
-        for filename in filenames:
+        for task in todo_tasks:
             # Filter files with 'input_dataset_' prefix
-            if filename.startswith("input_dataset_"):
-                self.task_queue.put(filename)
+            # may use enum in the future
+            if task.startswith("input_dataset_"):
+                self.task_queue.put(task)
                 self.total_tasks += 1
         
-        print(f"[Coordinator] Successfully loaded {len(filenames)} tasks from AFS")
+        print(f"[Coordinator] Successfully loaded {len(todo_tasks)} tasks from AFS")
 
     def GetTask(self, request, context):
         """

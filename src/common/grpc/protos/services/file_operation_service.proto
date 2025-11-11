@@ -9,6 +9,5 @@ service FileOperationService {
     rpc CloseFile (CloseFileRequest) returns (CloseFileResponse);
     rpc ReadFile (ReadFileRequest) returns (ReadFileResponse);
     rpc WriteFile (WriteFileRequest) returns (WriteFileResponse);
-    rpc CheckFileVersion (CheckVersionRequest) returns (CheckVersionResponse);
     rpc ListFiles (ListFilesRequest) returns (ListFilesResponse);
 }

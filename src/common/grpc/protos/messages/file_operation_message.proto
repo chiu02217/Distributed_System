@@ -67,25 +67,5 @@ message ListFilesResponse {
   string error = 2;
 }
 
-message FileMetaData {
-  google.protobuf.StringValue filename = 1;
-  google.protobuf.Int64Value size = 2;
-  google.protobuf.Timestamp timestamp = 3;
-  google.protobuf.Int32Value version = 4;
-  google.protobuf.StringValue checksum = 5;
-}
 
-message FileContent {
-    FileMetaData metadata = 1;
-    bytes content = 2;
-}
 
-message CheckVersionRequest {
-    string filename = 1;
-    int32 client_version = 2;
-}
-
-message CheckVersionResponse {
-    bool is_valid = 1;
-    int32 current_version = 2;
-}

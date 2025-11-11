@@ -6,15 +6,15 @@ set PROJECT_ROOT=%~dp0..
 set PROTO_DIR=%PROJECT_ROOT%\src\common\grpc\protos
 set OUTPUT_DIR=%PROJECT_ROOT%\src\common\grpc\auto_generated
 
-::  directory check
+::  make directory 
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
-:: clear legacy files
+:: clear old files
 del /Q "%OUTPUT_DIR%\*.py" 2>nul
 del /Q "%OUTPUT_DIR%\*.pyi" 2>nul
 
-:: compile .proto files
-echo Compiling .proto files...
+:: compile proto files
+echo Compiling...
 python -m grpc_tools.protoc ^
     -I"%PROTO_DIR%\messages" ^
     -I"%PROTO_DIR%\services" ^
@@ -25,16 +25,14 @@ python -m grpc_tools.protoc ^
     "%PROTO_DIR%\services\*.proto"
 
 ::  fix relative imports
-echo Patching generated files for relative imports...
+echo Patching generated files for correct dir...
 powershell -Command "Get-ChildItem -Path '%OUTPUT_DIR%\file_operation_service_*.py*' | ForEach-Object { (Get-Content -Path $_.FullName -Raw) -replace 'import file_operation_message_pb2', 'from . import file_operation_message_pb2' | Set-Content -Path $_.FullName -Encoding utf8 }"
 powershell -Command "Get-ChildItem -Path '%OUTPUT_DIR%\coordinator_service_*.py*' | ForEach-Object { (Get-Content -Path $_.FullName -Raw) -replace 'import coordinator_message_pb2', 'from . import coordinator_message_pb2' | Set-Content -Path $_.FullName -Encoding utf8 }"
 powershell -Command "Get-ChildItem -Path '%OUTPUT_DIR%\snapshot_service_*.py*' | ForEach-Object { (Get-Content -Path $_.FullName -Raw) -replace 'import snapshot_message_pb2', 'from . import snapshot_message_pb2' | Set-Content -Path $_.FullName -Encoding utf8 }"
 powershell -Command "Get-ChildItem -Path '%OUTPUT_DIR%\coordinator_service_*.py*' | ForEach-Object { (Get-Content -Path $_.FullName -Raw) -replace 'import coordinator_service_pb2', 'from . import coordinator_service_pb2' | Set-Content -Path $_.FullName -Encoding utf8 }"
 
-:: directory
-echo. > "%OUTPUT_DIR%\__init__.py"
 
-echo Proto files compiled successfully!
+echo finish compiling, check whether there is any error messages!
 echo Output directory: %OUTPUT_DIR%
 
 endlocal

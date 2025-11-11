@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 class ICoordinatorSnapshotHandler(ABC):
     
     @abstractmethod
-    def initiate_snapshot(self):
+    def initiate_coor_snapshot(self):
         pass
 
     @abstractmethod
@@ -11,7 +11,7 @@ class ICoordinatorSnapshotHandler(ABC):
         pass
 
     @abstractmethod
-    def save_state_to_afs(self, filename, state_data):
+    def save_coor_snapshot_to_afs(self, filename, state_data):
         pass
 
     @abstractmethod
@@ -23,5 +23,5 @@ class ICoordinatorSnapshotHandler(ABC):
         pass
 
     @abstractmethod
-    def recover_from_snapshot(self):
+    def coor_recover_from_snapshot(self):
         pass

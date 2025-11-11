@@ -1,117 +1,127 @@
-```
-DS/
-├── src/
-│   ├── __init__.py              
-│   ├── common/
-│   │   ├── grpc/
-│   │   │   ├── auto_generated   # put the automatically generated code by compiler here
-│   │   │   ├── protos
-│   │   │   │   ├── messages     # put messages here
-│   │   │   │   ├── services     # put services here
-│   │   ├── __init__.py
-│   │   └── utils.py             # common functions
-│   ├── afs/                     # main system
-│   │   ├── __init__.py
-│   │   ├── client/
-│   │   └── server/
-│   └── app/                     # task 2 prime number app logic
-├── config/                       # put setting files here (related to server blablabla)
-├── tests/                        # put tests scripts (here)
-├── scripts/                      # put startup scripts here
-├── docker/
-├── docs/                         # design and function docs here
-│   └── design.md
-├── requirements.txt              # Python dependencies
-├── setup.py                      # pakaging setting (optional)
-├── .env                          # environment variable setting (sensitive settings, pls put this file to gitignore and share only with each other) 
-├── .gitignore                    # Git ignore
-└── README.md                     # project notification
-```
-# AFS Distributed System
+# AFS Distributed File Processing System
 
-# Project Overview
-AFS (Abstract File System) is a distributed file processing system that implements a coordinator-worker architecture for parallel task execution. The system consists of four main components: AFS Server, Coordinator, Workers, and AFS Client, which communicate via gRPC.
+## 1. Introduction
 
-# File Structure
+The **AFS (Abstract File System)** project implements a fault-tolerant distributed computing framework utilizing a **Coordinator–Worker architecture** for parallel file processing. The primary communication mechanism across all components is **gRPC**, ensuring well-defined and efficient inter-process data exchange.
 
-```
-.
-├── README.md
-├── data/
-│   ├── client_storage/
-│   └── server_storage/
-│       ├── input/  #### input prime files
-│       │   └── input_dataset_001.txt
-│       └── output/ #### output prime results
-│           └── primes.txt
-├── scripts/    #### Protobuf Compilation
-│   ├── compile_proto.sh
-│   └── compile_proto.bat
-└── src/
-    ├── afs/
-    │   ├── client/
-    │   │   └── afs_client.py  #### AFSClient: User interface for file operations
-    │   ├── server/
-    │   │   └── afs_server.py      #### AFSServer: File storage and transfer management
-    │   ├── coordinator/
-    │   │   └── coordinator.py #### Coordinator: Task distribution and result aggregation
-    │   └── worker/
-    │       └── worker.py      #### Worker: Task execution
-    ├── common/
-    │   ├── grpc/
-    │   │   ├── protos/        #### Protobuf Documentation
-    │   │   │   ├── messages/
-    │   │   │   │   ├── file_operation_message.proto
-    │   │   │   │   └── coordinator_message.proto
-    │   │   │   └── services/
-    │   │   │       ├── file_operation_service.proto
-    │   │   │       └── coordinator_service.proto
-    │   │   └── auto_generated/
-    │   └── utils.py
-    └── app/
+The system is designed to handle large-scale computational tasks, such as **prime number generation**, while maintaining data consistency and operational resilience through **state management** and **replication**.
 
-```
+---
 
-## Quick Start
-### Install Dependencies
+## 2. Core Components
+
+The system comprises four primary components that interact via remote procedure calls:
+
+### **AFS Server**
+
+* Acts as the **data storage layer**.
+* Manages file storage, chunking, and data transfer requests from Workers and the AFS Client.
+* Supports **Primary–Backup/Raft-based replication** for high availability.
+
+### **Coordinator**
+
+* Serves as the **central control unit**.
+* Manages the global state, distributes tasks (file segments) to Workers, monitors progress, and aggregates results.
+
+### **Worker**
+
+* Functions as the **computational unit**.
+* Retrieves file segments from the AFS Server, executes the processing algorithm, and reports task completion to the Coordinator.
+* Implements **snapshotting** for localized fault recovery.
+
+### **AFS Client**
+
+* Provides the **user interface** to interact with the system.
+* Enables file uploads, task initiation, and result retrieval.
+
+---
+
+## 3. Deployment and Execution
+
+### 3.1 Prerequisites
+
+The project is developed using **Python 3.10+**. Install dependencies before execution:
+
 ```bash
-pip install grpcio grpcio-tools pysyncobj
+pip install -r requirements.txt
 ```
-### Generate gRPC Files
+
+> **Key dependencies:** `grpcio`, `grpcio-tools`, `pysyncobj`
+
+---
+
+### 3.2 gRPC Code Generation
+
+Compile the Protocol Buffer definitions before running:
+
 ```bash
-# Linux/Mac
+# Linux/macOS
 ./scripts/compile_proto.sh
 
 # Windows
 scripts\compile_proto.bat
 ```
-### Run
-Example code for quick start: (must in separate terminal!)
-```
-# single server start:
+
+---
+
+### 3.3 Execution Modes
+
+Each core component must run in a separate terminal instance.
+
+#### **Mode 3.3.1: Single Server Development Mode**
+
+Run with a single AFS Server (no high availability):
+
+```bash
+# 1. Launch AFS Server (Instance 0)
 SINGLE_MODE=true python -m src.afs_server.afs_server 0
 
-# primary-backup server start:
+# 2. Launch Coordinator
+python -m src.afs_coordinator.coordinator
+
+# 3. Launch Workers
+SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-1
+SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-2
+SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-3
+```
+
+---
+
+#### **Mode 3.3.2: High Availability (HA) Cluster Mode**
+
+Run multiple AFS Server instances to form a **Primary–Backup/Raft cluster**:
+
+```bash
+# 1. Launch AFS Servers (e.g., 3 replicas)
 python -m src.afs_server.afs_server 0
 python -m src.afs_server.afs_server 1
 python -m src.afs_server.afs_server 2
 
+# 2. Launch Coordinator
 python -m src.afs_coordinator.coordinator
 
-# single server - worker start:
-SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-1
-SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-2
-SINGLE_MODE=true python -m src.worker.worker_client.worker_client worker-3
-
-# primary-backup server - worker start:
+# 3. Launch Workers
 python -m src.worker.worker_client.worker_client worker-1
 python -m src.worker.worker_client.worker_client worker-2
 python -m src.worker.worker_client.worker_client worker-3
 ```
-## System Architecture
-The AFS system follows a distributed computing pattern with the following components:
-### AFS Server
-### AFS Client
-### Coordinator
-### Worker
 
+---
+
+## 4. Directory Structure
+
+| Directory               | Description                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------ |
+| **src/afs_server**      | AFS File Server implementation and storage management logic                                |
+| **src/afs_coordinator** | Coordinator’s task distribution, state management, and snapshot logic                      |
+| **src/worker**          | Worker implementation: task execution, reporting, and service interfaces                   |
+| **src/afs_client**      | Command-line client for system interaction                                                 |
+| **src/common/grpc**     | Protobuf message/service definitions and generated Python files                            |
+| **src/common/storage**  | Persistent storage backends (e.g., `raft_storage.py`, `simple_storage.py`)                 |
+| **src/common**          | Shared utilities, configuration management, logging, and core algorithms (`prime_algo.py`) |
+| **config**              | External configuration files (e.g., `config.json` for network setup)                       |
+| **data**                | Persistent data directory (input files, snapshots, logs)                                   |
+| **tests**               | Unit and integration test suite                                                            |
+| **scripts**             | System utility scripts (e.g., Protobuf compilation)                                        |
+
+---

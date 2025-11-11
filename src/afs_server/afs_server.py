@@ -40,11 +40,9 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
                 return True
             time.sleep(0.1)
         return False
-
+    # get file path accorfding to file name
+    # every type of files belongs to only one place 
     def _get_file_path(self, filename: str) -> str:
-        """
-        Get the file path based on the filename.
-        """
         if filename.startswith("input_dataset_"):
             return os.path.join(self.input_dir, filename)
         elif filename.startswith("snapshot_"):
@@ -52,7 +50,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         elif filename.startswith("primes.txt"):
             return os.path.join(self.output_dir, filename)
         else:
-            # Default case - put in output directory
+            # Default 
             return os.path.join(self.output_dir, filename)
 
     def _get_request_id(self, request):
@@ -82,7 +80,13 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
 
         try:
             file_path = self._get_file_path(request.filename)
+            # chceck whether file is exist or not
+            object_file_exist_or_not = request.filename.startswith(("snapshot_", "input_dataset_"))
             
+            # if not then return
+            if object_file_exist_or_not and not os.path.exists(file_path):
+                response.error = f"No such file or directory: {request.filename}"
+                return response
             with self.handle_lock:
                 handle = self.next_handle
                 self.next_handle += 1
@@ -369,6 +373,9 @@ def start_afs_server(node_id):
     abs_input_dir = os.path.normpath(os.path.join(PROJECT_ROOT, input_dir))
     abs_output_dir = os.path.normpath(os.path.join(PROJECT_ROOT, output_dir))
     abs_snapshot_dir = os.path.normpath(os.path.join(PROJECT_ROOT, snapshot_dir))
+    os.makedirs(abs_input_dir, exist_ok=True)
+    os.makedirs(abs_output_dir, exist_ok=True)
+    os.makedirs(abs_snapshot_dir, exist_ok=True)
     
     single_mode = os.getenv("SINGLE_MODE", "false").lower() == "true"
 

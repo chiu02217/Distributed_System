@@ -177,8 +177,9 @@ class Worker(IWorker):
                 return 
 
             worker_snapshot_file = self.afs_client.open_file(latest_snapshot_file)
+            # no snapshot found
             if worker_snapshot_file is None:
-                print(f"[{self.worker_id}] No snapshot '{latest_snapshot_file}' found. Starting recovery.")
+                print(f"[{self.worker_id}] No snapshot '{latest_snapshot_file}' found. Starting from begin")
                 return 
             # find snapshot
             print(f"[{self.worker_id}] Found snapshot '{latest_snapshot_file}'. Loading...")
@@ -206,7 +207,7 @@ class Worker(IWorker):
             print(f"[{self.worker_id}] load snapshot failed: {e}.")
         finally:
             # finally task
-            print(f"[{self.worker_id}] Updating snapshot file '{latest_snapshot_file}'...")
+            print(f"[{self.worker_id}] Updating or Creating snapshot file '{latest_snapshot_file}'...")
             self.worker_snapshot_handler.save_current_progress()
 
     # Handle main task processing loop.

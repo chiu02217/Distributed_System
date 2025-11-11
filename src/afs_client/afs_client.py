@@ -17,10 +17,10 @@ class AFSClient(IAFSClient):
         print(f"Connected to server, cache dir: {self.cache_dir}")
 
     # open a file from AFS server, return handle
-    def open_file(self, filename: str):
+    def open_file(self, filename: str, request_id: str = None):
         try:
             print(f"AFSClient: opening file {filename} ")
-            request: messages.OpenFileRequest = messages.OpenFileRequest(filename=filename)
+            request: messages.OpenFileRequest = messages.OpenFileRequest(filename=filename, request_id=request_id)
             response: messages.OpenFileResponse = self.stub.OpenFile(request)
             
             if response.error:
@@ -45,9 +45,9 @@ class AFSClient(IAFSClient):
             return None
     
     # create a new file on AFS server
-    def create_file(self, filename: str):
+    def create_file(self, filename: str, request_id:str = None):
         try:
-            request =  messages.CreateFileRequest(filename=filename)
+            request =  messages.CreateFileRequest(filename=filename, request_id=request_id)
             response = self.stub.CreateFile(request)
             
             if response.error:

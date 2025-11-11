@@ -328,7 +328,7 @@ class Worker(IWorker):
 
             else:
                 # Raft mode: use direct stub
-                request_id = f"{self.worker_id}-open-{uuid.uuid4()}"
+                request_id = f"{self.worker_id}-open-{filename}-{uuid.uuid4()}"
                 open_request = afs_messages.OpenFileRequest(
                     filename=filename,
                     request_id=request_id
@@ -369,11 +369,20 @@ class Worker(IWorker):
                 with open(cache_file_path, 'w') as cache_file:
                     cache_file.write("\n".join(content))
                 print(f"[Worker {self.worker_id}] Cached file {filename} locally.")
-                
+                lines_to_skip = 0;
+                with self.state_lock:
+                    if self.current_task_filename == filename and self.current_task_line > 0:
+                        lines_to_skip = self.current_task_line
+                        print(f"[Worker [self.worker_id] recover from snapshot, skip {lines_to_skip} lines")
+
                 # Process prime numbers
                 line_counter = 0
                 for line in content:
                     line_counter += 1
+
+                    if line_counter <= lines_to_skip:
+                        continue
+
                     line = line.strip()
                     if not line:
                         continue

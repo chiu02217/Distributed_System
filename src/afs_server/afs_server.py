@@ -1,14 +1,14 @@
 from concurrent import futures
 import time
 import grpc
+from src.common.grpc.auto_generated import file_operation_message_pb2 as messages
+from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as service
+from src.common.storage.simple_storage import SimpleStorage
+from src.common.storage.raft_storage import RaftStorage
+from src.common.config_loader import CONFIG
 import os
 import sys
 import threading
-from src.common.grpc.auto_generated import file_operation_message_pb2 as messages
-from src.common.grpc.auto_generated import file_operation_service_pb2_grpc as service
-from src.common.config_loader import CONFIG
-from src.common.storage.simple_storage import SimpleStorage
-from src.common.storage.raft_storage import RaftStorage
 
 
 # for test relative path
@@ -22,7 +22,6 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         self.output_dir = output_dir
         self.snapshot_dir = snapshot_dir
         
-        # Raft storage
         self.raft = raft_storage
         
         # Initialize file handle management
@@ -38,9 +37,10 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         while time.time() - start < timeout:
             if self.raft.isReady():
                 return True
+            # wait for refresh
             time.sleep(0.1)
         return False
-    # get file path accorfding to file name
+    # get file paths according to file name
     # every type of files belongs to only one place 
     def _get_file_path(self, filename: str) -> str:
         if filename.startswith("input_dataset_"):
@@ -78,6 +78,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             print(f"[AFS Server] The request_id({request_id}) has been executed before, with handle {response.handle}")
             return response
 
+        # main implementation
         try:
             file_path = self._get_file_path(request.filename)
             # chceck whether file is exist or not
@@ -119,11 +120,14 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
     def ReadFile(self, request: messages.ReadFileRequest, context: grpc.ServicerContext):
         response = messages.ReadFileResponse()
         
+        # dor idempotent function, we can not use duplicate call for maintain
+        # check if on the leader node
         if not self._is_primary():
             response.error = "Current node is not the primary server. Please connect to the primary server."
             print(f"[AFS Server] Error: {response.error}") 
             return response
-
+        
+        # main implementation
         try:
             handle_info = None
             for _ in range(5):
@@ -131,12 +135,10 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
                 if handle_info:
                     break
                 time.sleep(0.2)
+            # fault tolerance
             if not handle_info:
                 response.error = f"Invalid handle: {request.handle}"
                 return response
-            
-
-            print(f"[AFS Server] Reading file: {handle_info['filename']}")
 
             with open(handle_info['path'], 'rb') as f:
                 response.content = f.read()
@@ -152,6 +154,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
     def CreateFile(self, request, context):
         response = messages.CreateFileResponse()
 
+        # same as OpenFile()
         if not self._wait_ready():
             response.error = "The server cluster hasn't been ready, please try again later."
             print(f"[AFS Server] Error: {response.error}")
@@ -161,7 +164,8 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             response.error = "Current node is not the primary server. Please connect to the primary server."
             print(f"[AFS Server] Error: {response.error}") 
             return response
-      
+        
+        # for safe_call
         request_id = self._get_request_id(request)
         if request_id and self.raft.is_request_executed(request_id):
             cached_response = self.raft.get_cached_response(request_id)
@@ -170,6 +174,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             print(f"[AFS Server] The request_id({request_id}) has been executed before, with handle {response.handle}")
             return response
         
+        # main implementation
         try:
             file_path = self._get_file_path(request.filename)
             with open(file_path, 'wb') as f: 
@@ -221,6 +226,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             print(f"[AFS Server] The request_id({request_id}) has been executed before")
             return response
         
+        # main implementation
         try:
             handle_info = self.raft.get(f"handle_{request.handle}")
             if not handle_info:
@@ -274,6 +280,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             print(f"[AFS Server] The request_id({request_id}) has been executed before")
             return response
         
+        # main implementation
         try:
             handle_info = self.raft.get(f"handle_{request.handle}")
             if not handle_info:

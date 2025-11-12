@@ -59,12 +59,12 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
     # non-idempotent function
     def OpenFile(self, request: messages.OpenFileRequest, context: grpc.ServicerContext):
         response = messages.OpenFileResponse()
-       
+        # check if raft cluster is ready 
         if not self._wait_ready():
             response.error = "The server cluster hasn't been ready, please try again later."
             print(f"[AFS Server] Error: {response.error}")
             return response
-        
+        # check if this node is the leader node 
         if not self._is_primary():
             response.error = "Current node is not the primary server. Please connect to the primary server."
             print(f"[AFS Server] Error: {response.error}")
@@ -178,6 +178,8 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             with self.handle_lock:
                 handle = self.next_handle
                 self.next_handle += 1
+
+            # raft polling
             self.raft.set(f"handle_{handle}", {
                 'filename': request.filename,
                 'path': file_path,

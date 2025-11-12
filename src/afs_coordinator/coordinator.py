@@ -114,7 +114,7 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         todo_tasks = safe_call(self.afs_client.list_files, 
                               max_retries=5, 
                               delay=2,
-                              path="inputs")
+                              file_store_path="inputs")
 
         if todo_tasks is None:
             print("[Coordinator] No tasks or error loading files from AFS after retries.")

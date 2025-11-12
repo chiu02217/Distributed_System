@@ -1,28 +1,24 @@
 from abc import ABC, abstractmethod
 
 class IAFSClient(ABC):
-    """
-    AFS Client Interface
-    .
-    """
 
     @abstractmethod
     def open_file(self, filename):
         """
-        Open a remote file, cache it locally, and return a handle.
+        as name
         
         Args:
             filename (str): The name of the remote file to open.
 
         Returns:
-            A handle, or None on failure.
+            A file u want to open
         """
         pass
 
     @abstractmethod
-    def write_file(self, handle, data):
+    def write_file(self, open_file_handle, data):
         """
-        Write a line of data to the local cache file corresponding to the handle.
+        as name
         
         Args:
             handle: The handle obtained from open_file or create_file.
@@ -34,60 +30,28 @@ class IAFSClient(ABC):
         pass
 
     @abstractmethod
-    def read_file(self, handle):
+    def read_file(self, open_file_handle):
         """
-        from local cache read a line of data (a number).
-        
-        Args:
-            handle: from open_file get handle.
-        
-        Returns:
-            str: number.
-            None: if end of file is reached or line is empty.
+         as name
         """
         pass
 
     @abstractmethod
     def create_file(self, filename):
         """
-        Create a new file on the remote server and an empty copy in local cache.
-        
-        Args:
-            filename (str): remote file name.
-
-        Returns:
-            A handle, or None on failure.
+       as name 
         """
         pass
 
     @abstractmethod
-    def get_local_path(self, handle):
+    def close_file(self, open_file_handle):
         """
-        """
-        pass
-
-    @abstractmethod
-    def mark_modified(self, handle):
-        """
+        as name
         """
         pass
 
     @abstractmethod
-    def close_file(self, handle):
-        """
-        Close the handle. If the file is marked as 'modified',
-        upload the local cache content back to the server.
-
-        Args:
-            handle: The handle to close.
-        
-        Returns:
-            bool: Whether the close/upload was successful.
-        """
-        pass
-
-    @abstractmethod
-    def list_files(self, path):
+    def list_files(self, file_store_path):
         """
         List all files stored on the AFS server.
 
@@ -108,8 +72,14 @@ class IAFSClient(ABC):
 
     @abstractmethod
     def read_json_file(self, open_file):
+        """
+        For reading snapshot file
+        """
         pass
 
     @abstractmethod
     def find_latest_worker_snapshot(self, worker_id:str):
+        """
+        as name
+        """
         pass

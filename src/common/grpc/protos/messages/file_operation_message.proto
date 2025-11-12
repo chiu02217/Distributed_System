@@ -54,7 +54,7 @@ message WriteFileRequest {
 
 message WriteFileResponse {
     bool success = 1;
-    string error_message = 2;
+    string error = 2;
     int32 new_version = 3;
 }
 

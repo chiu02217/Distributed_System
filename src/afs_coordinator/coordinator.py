@@ -22,23 +22,19 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 def safe_call(func, max_retries=3, delay=1, *args, **kwargs):
     """
     Safely call a gRPC function with retries on failure.
-     
-    Args:
-        func: The gRPC function to call.
-        max_retries: Maximum number of retries.
-        delay: Delay between retries in seconds.
-        *args, **kwargs: Arguments to pass to the gRPC function.
     """
     for attempt in range(max_retries):
         try:
             return func(*args, **kwargs)
+
         except grpc.RpcError as e:
-            if attempt < max_retries - 1:
-                print(f"[safe_call] gRPC error on attempt {attempt + 1}/{max_retries}: {e}")
-                time.sleep(delay)
-            else:
+            
+            if attempt >= max_retries - 1:
                 print(f"[safe_call] Failed after {max_retries} attempts: {e}")
                 return None
+            else:
+                print(f"[safe_call] gRPC error on attempt {attempt + 1}/{max_retries}: {e}")
+                time.sleep(delay)
         except Exception as e:
             print(f"[safe_call] Unexpected error: {e}")
             import traceback
@@ -48,12 +44,6 @@ def safe_call(func, max_retries=3, delay=1, *args, **kwargs):
         
 class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapshot_service.SnapshotServiceServicer):
     def __init__(self):
-        self.task_queue = Queue() 
-        
-        self.assigned_tasks = {} 
-        
-        self.all_primes = set()
-        
         # Locks for thread safety
         self.task_lock = threading.Lock()
         self.processing_lock = threading.Lock()
@@ -63,14 +53,17 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         self.submission_lock = threading.Lock()
         self.submitted_requests = set() 
         
+        # task management
+        self.task_queue = Queue() 
+        self.assigned_tasks = {} 
+        self.all_primes = set()
+        self.total_tasks = 0
+        self.completed_tasks = 0
+        
         # snapshot related
         self.workers = {}  # {worker_id: worker_address}
         self.worker_stubs = {}  # {worker_id: grpc stub}
         self.is_finished = False
-        
-        # task management
-        self.total_tasks = 0
-        self.completed_tasks = 0
         
         # higher cache size for grpc
         grpc_options = [
@@ -143,11 +136,11 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         # logic 1: resume task if worker is restarting
         with self.processing_lock:
             if worker_id in self.assigned_tasks:
-                filename = self.assigned_tasks[worker_id]
-                response.filename = filename
+                file_name = self.assigned_tasks[worker_id]
+                response.file_name = file_name
                 response.has_task = True
                 response.is_resume = True
-                print(f"[Coordinator] Resuming task: {filename} for worker {worker_id}")
+                print(f"[Coordinator] Resuming task: {file_name} for worker {worker_id}")
                 return response
         
         # logic 2: pop a new task
@@ -158,12 +151,12 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
                 print(f"[Coordinator] No tasks left to assign to worker {worker_id}.")
                 return response
             
-            filename = self.task_queue.get()
+            file_name = self.task_queue.get()
             response.has_task = True
-            response.filename = filename
-            self.assigned_tasks[request.worker_id] = filename
+            response.file_name = file_name
+            self.assigned_tasks[request.worker_id] = file_name
 
-            print(f"[Coordinator] Assigned task: {response.filename} to worker {worker_id}.")
+            print(f"[Coordinator] Assigned task: {response.file_name} to worker {worker_id}.")
             return response
         
         return response
@@ -182,7 +175,7 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
 
         with self.task_lock:
             self.assigned_tasks.pop(request.worker_id, None)
-            print(f"[Coordinator] Received results for task {request.filename} from worker {request.worker_id}. Total unique primes so far: {len(self.all_primes)}")
+            print(f"[Coordinator] Received results for task {request.file_name} from worker {request.worker_id}. Total unique primes so far: {len(self.all_primes)}")
             
             if self.task_queue.empty() and not self.assigned_tasks:
                 self.is_finished = True
@@ -210,18 +203,18 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         return snapshot_messages.RegisterWorkerIdResponse(success=True)
 
     def _save_results(self):
-        filename = 'primes.txt'
+        file_name = 'primes.txt'
         handle = None
         
         try:
             handle = safe_call(
                 self.afs_client.create_file, 
                 3, 1, 
-                filename
+                file_name
             )
             
             if handle is None:
-                print(f"[Coordinator] Error creating file {filename} in AFS.")
+                print(f"[Coordinator] Error creating file {file_name} in AFS.")
                 return
             
             all_data = "\n".join(str(prime) for prime in sorted(self.all_primes))
@@ -234,10 +227,10 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
             )
             
             if not write_success:
-                print(f"[Coordinator] Error writing to file {filename} in AFS.")
+                print(f"[Coordinator] Error writing to file {file_name} in AFS.")
                 return
             
-            print(f"[Coordinator] Saved {len(self.all_primes)} unique primes to {filename} in AFS.")
+            print(f"[Coordinator] Saved {len(self.all_primes)} unique primes to {file_name} in AFS.")
             
         except Exception as e:
             print(f"[Coordinator] Exception while saving results to AFS: {e}")
@@ -249,7 +242,7 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
                     5, 2,
                     handle
                 )
-                print(f"[Coordinator] Closed file {filename} in AFS.")
+                print(f"[Coordinator] Closed file {file_name} in AFS.")
 
     def Heartbeat(self, request: coordinator_messages.HeartbeatRequest, context):
         worker_id = request.worker_id

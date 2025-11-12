@@ -21,49 +21,61 @@ from src.afs_client.afs_client import AFSClient
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     
 class Worker(IWorker):
+    # Init worker
+    # worker_id = unique worker identifier
+    # worker_port = port for worker's snapshot server
     def __init__(self, worker_id, worker_port):
         self.worker_id = worker_id
         self.worker_port = worker_port 
         
-        # grpc cache size 100MB
+        # grpc cache size limited by 100MB
         grpc_options = [
             ('grpc.max_receive_message_length', 100 * 1024 * 1024),
             ('grpc.max_send_message_length', 100 * 1024 * 1024)
         ]
         
-        # Current primes storage
+        # Current primes storage, set means no duplicate
         self.current_primes = set()
         
-        # Connect to Coordinator
+        # Connect to the task management server (coordinator)
         coordinator_address = CONFIG.coordinator.coordinator_address
         
-        # abs path for cache dir
+        # absolute path for cache_dir (used for file caching)
+        # when worker readin file from afs, it will cache in this dir
         relative_cache_path = CONFIG.afs.afs_temp_path
         base_cache_dir = os.path.normpath(os.path.join(PROJECT_ROOT, relative_cache_path))
         print(f"[{self.worker_id}] Connecting to Coordinator at {coordinator_address}...")
         
-        # Setup coordinator connection
+        # Setup coordinator connection (port num: 50001)
         coordinator_channel = grpc.insecure_channel(coordinator_address, options=grpc_options)
         self.coordinator_stub = coordinator_service.CoordinatorServiceStub(coordinator_channel)
         self.snapshot_stub = snapshot_service.SnapshotServiceStub(coordinator_channel)
 
         # Connect to AFS
-        single_mode = os.getenv("SINGLE_MODE", "false").lower() == "true"
         base_afs_port = CONFIG.afs.port
 
+        # in the command line, set SINGLE_MODE=true to run single server afs system
+        single_mode = os.getenv("SINGLE_MODE", "false").lower() == "true"
         if single_mode:
-            # Single mode: use AFSClient
+            # SINGLE_MODE: 
+            # - file server address is fixed
+            # - worker only interact with single afs server without raft
             file_server_address = CONFIG.afs.server_address
             cache_dir = os.path.join(base_cache_dir, worker_id)
             print(f"[{self.worker_id}] Running in SINGLE MODE")
             print(f"[{self.worker_id}] Coordinator: {coordinator_address}, AFS: {file_server_address}")
             
+            # register normal afs client
+            # afs_client used for implementing some local call functions (open/read/write...)
             afs_channel = grpc.insecure_channel(file_server_address, options=grpc_options)
-            self.afs_client = AFSClient(cache_dir=cache_dir, channel=afs_channel)
+            self.afs_client = AFSClient(cache_dir=cache_dir, channel=afs_channel) 
             self.afs_stub = None  # Not used in single mode
             self.use_afs_client = True
         else:
             # Raft cluster mode: use direct stub with failover
+            # servers are mounted in the raft cluster, with checking the primary node and backup nodes.
+            # worker will only if connect to the primary node (the leader) then do file operations
+            # if the primary server crushed, raft cluster will elect a new primary server.
             self.afs_addresses = [
                 f'localhost:{base_afs_port}',
                 f'localhost:{base_afs_port + 1}',
@@ -71,14 +83,19 @@ class Worker(IWorker):
             ]
             print(f"[{self.worker_id}] Connecting to AFS Raft cluster...")
             
+            # connect to the Leader node
             self.afs_stub = self._connect_to_primary()
+            
+            # if failed to connect to any afs server, exit directly
             if not self.afs_stub:
-                print(f"[{self.worker_id}] Failed to connect to AFS cluster!")
+                print(f"[{self.worker_id}] Failed to connect to any server, quiting...")
                 sys.exit(1)
             
             self.cache_dir = os.path.join(base_cache_dir, worker_id)
             os.makedirs(self.cache_dir, exist_ok=True)
-            self.afs_client = None  # Not used in Raft mode
+            
+            # raft mode do not use afs client
+            self.afs_client = None
             self.use_afs_client = False
         
         # Snapshot related
@@ -89,6 +106,7 @@ class Worker(IWorker):
         self.worker_snapshot_handler = WorkerSnapshotHandler(self)
         
         # Heartbeat control
+        # Heartbeat: responsible for monitoring the liveness of the worker with handling task reassignment when worker crashes
         self.stop_heartbeat = threading.Event()
         threading.Thread(target=self._send_heartbeat, daemon=True).start()
         
@@ -98,8 +116,10 @@ class Worker(IWorker):
             port=self.worker_port,
         )
     # Connect to primary server in Raft cluster
-    def _connect_to_primary(self, max_server=5):
-        for retry in range(max_server):
+    def _connect_to_primary(self, max_retries=5):
+        # try connection for 5 times (default max_retries=5)
+        for retry in range(max_retries):
+            # for each server address, just try to connect and the raft cluster will allocate the primary server to reponse
             for addr in self.afs_addresses:
                 try:
                     channel = grpc.insecure_channel(addr)
@@ -113,7 +133,7 @@ class Worker(IWorker):
                         print(f"[{self.worker_id}] {addr} returned error: {response.error}")
                         continue 
 
-                    # find primary
+                    # found the Leader node (primary server)
                     print(f"[{self.worker_id}] Connected to AFS at {addr}")
                     self.current_afs_address = addr
                     return stub
@@ -121,35 +141,41 @@ class Worker(IWorker):
                 except Exception as e:
                     print(f"[{self.worker_id}] Failed to connect to {addr}: {e}")
                     continue
-            if retry < max_server - 1:
+            if retry < max_retries - 1:
                 print(f"[{self.worker_id}] No Primary node found, retrying...")
                 time.sleep(2)
 
         return None
 
     # Call AFS with automatic retry and failover
+    # used in file operations (which are similar to afs client functions, but with direct stub calls)
     def _call_afs_with_retry(self, operation_name, request_func, max_retries=3):
+        # try to call for max_retries times
         for attempt in range(max_retries):
             try:
                 response = request_func(self.afs_stub)
                 # I think it is better to set response.error as boolean, error message is str(Danny)
+                # if primary server changed, try to reconnect
                 if hasattr(response, 'error') and response.error:
                     if "not the primary" in response.error:
-                        print(f"[{self.worker_id}] {operation_name}: Need to reconnect to primary server")
+                        print(f"[{self.worker_id}] {operation_name}: waiting to reconnect to primary server")
                         new_stub = self._connect_to_primary()
-                        if new_stub:
+                        if not new_stub:
+                            print(f"[{self.worker_id}] failed to reconnect")
+                            return None
+                        else:
                             self.afs_stub = new_stub
                             print(f"[{self.worker_id}] Reconnected, retrying {operation_name}...")
                             continue
-                        else:
-                            print(f"[{self.worker_id}] Failed to reconnect")
-                            return None
                     return response
                 return response
             except grpc.RpcError as e:
+                # handle grpc errors and try to reconnect to primary node
                 print(f"[{self.worker_id}] gRPC error in {operation_name} (attempt {attempt+1}/{max_retries}): {e}")
+                
                 if attempt < max_retries - 1:
                     print(f"[{self.worker_id}] Trying to reconnect...")
+                    
                     new_stub = self._connect_to_primary()
                     if new_stub:
                         self.afs_stub = new_stub
@@ -162,6 +188,8 @@ class Worker(IWorker):
             except Exception as e:
                 print(f"[{self.worker_id}] Unexpected error in {operation_name}: {e}")
                 return None
+            
+        # cannot succeed after max retries
         print(f"[{self.worker_id}] {operation_name} failed after {max_retries} attempts")
         return None
 
@@ -171,9 +199,9 @@ class Worker(IWorker):
         latest_snapshot_file = f"snapshot_worker_{self.worker_id}.json"
         
         try:
-            # Raft mode
+            # If there is the raft cluster mode, we do not support snapshot recovery at present
             if not self.use_afs_client:
-                print(f"[{self.worker_id}] Snapshot recovery not yet implemented for Raft mode")
+                print(f"[{self.worker_id}] Snapshot recovery not yet implemented for Raft Cluster mode")
                 return 
 
             worker_snapshot_file = self.afs_client.open_file(latest_snapshot_file)
@@ -181,7 +209,8 @@ class Worker(IWorker):
             if worker_snapshot_file is None:
                 print(f"[{self.worker_id}] No snapshot '{latest_snapshot_file}' found. Starting from begin")
                 return 
-            # find snapshot
+            # found snapshot
+            # remember to check the privilage for snapshot directory! (work on Windows but failed in DICE)
             print(f"[{self.worker_id}] Found snapshot '{latest_snapshot_file}'. Loading...")
             state_json_data = self.afs_client.read_json_file(worker_snapshot_file)
             self.afs_client.close_file(worker_snapshot_file)
@@ -194,6 +223,11 @@ class Worker(IWorker):
             state_data = state_json_data.decode('utf-8')
             state = json.loads(state_data)
             
+            # get the previous state
+            # - if current_task_filename is None: 
+            #   means no task assigned before crash
+            # - else:
+            #   continue from the previous task line
             with self.state_lock:
                 self.current_task_filename = state.get("current_task_filename")
                 self.current_task_line = state.get("current_task_line", 0)
@@ -240,182 +274,244 @@ class Worker(IWorker):
         while True:
             # Grpc use try catch when awkward might happen
             try:
-                task_request = coordinator_messages.GetTaskRequest(worker_id=self.worker_id)
-                task_response:coordinator_messages.GetTaskResponse = self.coordinator_stub.GetTask(task_request)
+                task_req = coordinator_messages.GetTaskRequest(worker_id=self.worker_id)
+                task_res = self.coordinator_stub.GetTask(task_req)
                 
             except grpc.RpcError as e:
                 print(f"[{self.worker_id}] gRPC error while getting task: {e}")
                 continue
             
-            if not task_response.has_task:
+            # has_task is also stored in coordinator's snapshot. 
+            # For second time test, remember to clear the snapshot cache and then work on
+            if not task_res.has_task:
                 print(f"[{self.worker_id}] No more tasks available. Worker Leaving")
                 self.stop_heartbeat.set()
                 break
             
-            print(f"[{self.worker_id}] Received task: {task_response.filename}")
+            print(f"[{self.worker_id}] Received task: {task_res.filename}")
             
-            # Update state for new task
+            # Update state for current task and store it to snapshot
+            # if task was assigned, then just continue to work
             with self.state_lock:
-                if self.current_task_filename != task_response.filename:
-                    self.current_task_filename = task_response.filename
+                if self.current_task_filename != task_res.filename:
+                    self.current_task_filename = task_res.filename
                     self.current_task_line = 0
                     self.current_primes.clear()
             
-            process_success = self._process_task(task_response.filename)
+            # start the main implementation -- searching prime numbers
+            process_success = self._process_task(task_res.filename)
+            
+            # error handling: if failed, retry after 5s
             if not process_success:
-                print(f"[{self.worker_id}] Task {task_response.filename} failed, retry in 5s")
+                print(f"[{self.worker_id}] Task {task_res.filename} failed, retry in 5s")
                 # every 5s
                 time.sleep(5)
-            # check if last task is successful or not, if yes then clear
+                
+            # last task has been successfully processed
+            # which means uploading results to coordinator successfully
             with self.state_lock:
                 self.current_task_filename = None
                 self.current_task_line = 0
-        # no task then stop
+                
+        # if all tasks are processed, stop the iteration
         self.grpc_server.stop(0)
-            
+    
+    # heartbeat msg will be sent every 3 seconds
+    # for coordinator to decide whether the worker is alive or not
+    # if it is not alive for N seconds, coordinator will just resassign the task to another worker or return it to the waiting queue
     def _send_heartbeat(self):
+        # stop_heartbeat will only be set when all tasks are finished
         while not self.stop_heartbeat.is_set():
             try:
                 self.coordinator_stub.Heartbeat(
                     coordinator_messages.HeartbeatRequest(worker_id=self.worker_id)
                 )
-                print(f"[{self.worker_id}] Sent heartbeat")
+                print(f"[{self.worker_id}] send heartbeat to coordinator...")
             except grpc.RpcError as e:
                 print(f"[{self.worker_id}] Heartbeat failed: {e}")
-            # send every 3s
+            # Heartbeat Interval: send every 3s
             time.sleep(3)
-    #Read file and process prime numbers, support snapshot recovery
+      
+    # Main Implementation:      
+    # Read file and process prime numbers, support snapshot recovery
     def _process_task(self, filename):
         file_handle = None
 
         try:
+            # check if it is single node mode:
+            # use_afs_client => SINGLE_MODE
             if self.use_afs_client:
-                # Single mode: use AFSClient
                 file_handle = self.afs_client.open_file(filename)
+                
+                # error handling
                 if file_handle is None:
                     print(f"[{self.worker_id}] Error: Could not open file {filename}")
                     return False
 
+                # open file success
                 print(f"[{self.worker_id}] Processing file: {filename}")
 
-                # Check if need to recover from snapshot
+                # check if need to recover from snapshot
+                # if the snapshot file contains history for current task process
+                # count the lines that have been processed and skip them
                 lines_to_skip = 0
                 with self.state_lock:
-                    if self.current_task_filename == filename and self.current_task_line > 0:
-                        lines_to_skip = self.current_task_line
-                        print(f"[{self.worker_id}] recover from snapshot, skip {lines_to_skip} lines...")
+                    if self.current_task_filename == filename: # current file has snapshot
+                        if self.current_task_line > 0: # previous processing line is greater than 0
+                            lines_to_skip = self.current_task_line
+                            print(f"[{self.worker_id}] recover from snapshot, skip {lines_to_skip} lines...")
 
                 # Load and process file line by line
                 while True:
                     number_str = self.afs_client.read_file(file_handle)
+                    
+                    # error handling
                     if number_str == "SERVER_ERROR":
                         print(f"[Worker {self.worker_id}] Error: Could not read file {filename}")
                         return False
 
+                    # error handling
                     if number_str is None:
-                        break
+                        break # skip blank lines
 
-                    # Update snapshot current line number
+                    # update snapshot for current processing file ==> line num
                     with self.state_lock:
+                        # just move to next line
                         self.current_task_line += 1
 
-                    # Skip lines if recovering from snapshot
+                    # skip lines that already processed
                     if self.current_task_line <= lines_to_skip:
                         continue 
 
+                    # prime searching algorithm
+                    # main implementation is in src/common/prime_algo.py
                     try:
                         n = int(number_str)
                         if PrimeAlgorithm.is_prime(n):
                             self.current_primes.add(n)
+                    
+                    # error handling
                     except ValueError:
                         print(f"[{self.worker_id}] Skipping invalid line: {number_str}")
                         continue
-
+                    
+                    # save snapshot every 500 lines (handling large files)
                     if self.current_task_line > 0 and self.current_task_line % 500 == 0:
                         print(f"[{self.worker_id}] is storing local line {self.current_task_line}")
                         self.worker_snapshot_handler.save_current_progress()
                     
-                    time.sleep(0.01)  # delay for testing snapshot
-
+                    # small delay for testing snapshot
+                    time.sleep(0.01)
+                    
+                    
+            # Raft Cluster Mode (3-sever afs)
             else:
-                # Raft mode: use direct stub
-                request_id = f"{self.worker_id}-open-{filename}-{uuid.uuid4()}"
+                # handle safe_call for the gRPC functions
+                # each gRPC functions will be called with RETRY and failover mechanism
+                request_id = f"{self.worker_id}-open-{filename}-{uuid.uuid4()}"  # REQUEST_ID is unique for one processing iteration
+                
+                # gRPC application i) call OpenFile for [max_retries] times with same request_id
                 open_request = afs_messages.OpenFileRequest(
                     filename=filename,
                     request_id=request_id
                 )
                 open_response = self._call_afs_with_retry(
                     "OpenFile",
-                    lambda stub: stub.OpenFile(open_request)
+                    lambda stub: stub.OpenFile(open_request) # specific expression
                 )
-
+                
+                # error handling => no response (maybe all servers are down / network error)
                 if not open_response:
                     print(f"[{self.worker_id}] Error opening file: no response")
                     return False
+                
+                # error handling => not found or other errors
                 if open_response.error:
                     print(f"[{self.worker_id}] Error opening file: {open_response.error}")
                     return False
 
+                # OpenFile successfully called
                 file_handle = open_response.handle
                 print(f"[{self.worker_id}] File opened with handle: {file_handle}")
                 
+                # gRPC application ii) call ReadFile for [max_retries] times with same request_id
                 read_request = afs_messages.ReadFileRequest(handle=file_handle)
                 read_response:afs_messages.ReadFileResponse = self._call_afs_with_retry(
                     "ReadFile",
                     lambda stub: stub.ReadFile(read_request)
                 )
                 
+                # error handling
                 if not read_response:
                     print(f"[{self.worker_id}] Error reading file: no response")
                     return False
+                
+                # error handling
                 if read_response.error:
                     print(f"[{self.worker_id}] Error reading file: {read_response.error}")
                     return False
 
+                # ReadFile successfully called
                 content = read_response.content.decode('utf-8').splitlines()
                 print(f"[{self.worker_id}] Read {len(content)} lines")
 
-                # Cache file locally
+                # Cache the file (download from afs) locally
                 cache_file_path = os.path.join(self.cache_dir, filename)
                 with open(cache_file_path, 'w') as cache_file:
                     cache_file.write("\n".join(content))
                 print(f"[{self.worker_id}] Cached file {filename} locally.")
+                
+                # for snapshot recovery
                 lines_to_skip = 0;
                 with self.state_lock:
                     if self.current_task_filename == filename and self.current_task_line > 0:
                         lines_to_skip = self.current_task_line
                         print(f"[{self.worker_id}] recover from snapshot, skip {lines_to_skip} lines")
 
-                # Process prime numbers
+                # Process prime numbers (similar to SINGLE_NODE mode)
                 line_counter = 0
                 for line in content:
+                    # update line counter
                     line_counter += 1
-
+                    
+                    # skip lines that already processed
                     if line_counter <= lines_to_skip:
                         continue
-
+                    
+                    # clean line
                     line = line.strip()
+                    
+                    # skip blank lines
                     if not line:
                         continue
                     
+                    # update snapshot for current processing file ==> line num
                     with self.state_lock:
                         self.current_task_line = line_counter
                     
+                    # prime searching algorithm
                     try:
                         n = int(line)
                         if PrimeAlgorithm.is_prime(n):
                             self.current_primes.add(n)
+                            
+                    # error handling
                     except ValueError:
                         print(f"[{self.worker_id}] Skipping invalid line: {line}")
                         continue
                     
-                    time.sleep(0.01)  # delay for testing
+                    time.sleep(0.01)
 
-            # Submit results
+            # save current snapshot 
             with self.state_lock:
                 snapshot_id_to_report = self.current_snapshot_id
 
+            # Submit results to coordinator, coordinator will integrate the results and then send to afs server
             try:
+                # [No Fault Tolerance here!] 
+                # no safe_call for SubmitResult because it is an interaction between coordinator and worker, not between raft and workers
+                # if failed, need to retry the whole task
+                # SubmitResult is also a gRPC function, for distributed prime searching system
                 self.coordinator_stub.SubmitResult(
                     coordinator_messages.SubmitResultRequest(
                         worker_id=self.worker_id,
@@ -424,6 +520,10 @@ class Worker(IWorker):
                         snapshot_id=snapshot_id_to_report
                     )
                 )
+                # snapshot will also be sent to coordinator for recording
+                # snapshot file in worker side | snapshotid in coordinator side
+                
+                # after the response: successful submission
                 print(f"[{self.worker_id}] Submitted {len(self.current_primes)} primes from {filename}")
                 return True
             except grpc.RpcError as e:
@@ -431,12 +531,19 @@ class Worker(IWorker):
                 return False
 
         finally:
+            
             # Close file handle
+            # ensure the file hasn't leaked
             if file_handle is not None:
+                
+                # single node mode
                 if self.use_afs_client:
                     self.afs_client.close_file(file_handle)
                     print(f"[{self.worker_id}] Closed file {filename}")
+                    
+                # raft cluster mode
                 else:
+                    # gRPC application iii) call CloseFile for [max_retries] times with same request_id
                     close_request = afs_messages.CloseFileRequest(
                         handle=file_handle,
                         modified=False,
@@ -447,22 +554,30 @@ class Worker(IWorker):
                         lambda stub: stub.CloseFile(close_request)
                     )
                     
-                    if close_response and close_response.error:
-                        print(f"[{self.worker_id}] Error closing file: {close_response.error}")
-                    elif close_response:
-                        print(f"[{self.worker_id}] Closed file {filename}")
+                    # error handling
+                    if close_response:
+                        if close_response.error:
+                            print(f"[{self.worker_id}] Error closing file: {close_response.error}")
+                        else:
+                            # successful close
+                            print(f"[{self.worker_id}] Closed file {filename}")
+                    else:
+                        print(f"[{self.worker_id}] Error closing file: no response")
 
 if __name__ == '__main__':
+    # get worker id from command line args
     worker_id = sys.argv[1] if len(sys.argv) > 1 else 'worker-1'
-    # worker ports
-    default_port = CONFIG.worker.worker_snapshot_port
-    try:
-        worker_num = int(worker_id.split('-')[-1])
-        worker_port = default_port + (worker_num - 1)
-    except:
-        worker_port = default_port 
     
-    # debug
+    # snapshot server port for worker
+    default_port = CONFIG.worker.worker_snapshot_port
+    
+    try:
+        worker_num = int(worker_id.split('-')[-1])  # "worker-1" -> 1, "1" -> 1
+        worker_port = default_port + (worker_num - 1)  # each worker has different snapshot server
+    except:
+        worker_port = default_port # if parsing fails, just use default port
+    
+    # print the config info for checking
     print(f"Coordinator address: {CONFIG.coordinator.coordinator_address}")
     print(f"AFS Server address: {CONFIG.afs.server_address}")
     print(f"Worker port: {worker_port}")
@@ -471,4 +586,6 @@ if __name__ == '__main__':
         worker_id=worker_id,
         worker_port=worker_port,
     )
+
+    # start work
     worker.run_task()

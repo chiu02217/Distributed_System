@@ -40,15 +40,19 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             # wait for refresh
             time.sleep(0.1)
         return False
+
     # get file paths according to file name
     # every type of files belongs to only one place 
     def _get_file_path(self, filename: str) -> str:
         if filename.startswith("input_dataset_"):
             return os.path.join(self.input_dir, filename)
+        # data/input/...
         elif filename.startswith("snapshot_"):
             return os.path.join(self.snapshot_dir, filename)
+        # data/snapshot/...
         elif filename.startswith("primes.txt"):
             return os.path.join(self.output_dir, filename)
+        # data/output/...
         else:
             # Default 
             return os.path.join(self.output_dir, filename)
@@ -59,17 +63,20 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
     # non-idempotent function
     def OpenFile(self, request: messages.OpenFileRequest, context: grpc.ServicerContext):
         response = messages.OpenFileResponse()
+        
         # check if raft cluster is ready 
         if not self._wait_ready():
             response.error = "The server cluster hasn't been ready, please try again later."
             print(f"[AFS Server] Error: {response.error}")
             return response
+
         # check if this node is the leader node 
         if not self._is_primary():
             response.error = "Current node is not the primary server. Please connect to the primary server."
             print(f"[AFS Server] Error: {response.error}")
             return response
-
+        
+        # for safe_call: can be called several times by client and only run once for each request_id
         request_id = self._get_request_id(request)
         if request_id and self.raft.is_request_executed(request_id):
             cached_response = self.raft.get_cached_response(request_id)
@@ -88,17 +95,21 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             if object_file_exist_or_not and not os.path.exists(file_path):
                 response.error = f"No such file or directory: {request.filename}"
                 return response
+
             with self.handle_lock:
                 handle = self.next_handle
-                self.next_handle += 1
-            
+                self.next_handle += 1 # open file handle increases
+           
+            # send to raft cluster and let it to decide transmition
             self.raft.set(f"handle_{handle}", {
                 'filename': request.filename,
                 'path': file_path,
             })
+
             response.handle = handle
             print(f"[AFS Server] Opened file: {request.filename} with handle {handle}")
             
+            # also for safe_call
             if request_id:
                 self.raft.mark_request_executed(request_id, {
                     'handle': handle,
@@ -134,7 +145,8 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
                 handle_info = self.raft.get(f"handle_{request.handle}")
                 if handle_info:
                     break
-                time.sleep(0.2)
+                time.sleep(0.2
+                        )
             # fault tolerance
             if not handle_info:
                 response.error = f"Invalid handle: {request.handle}"
@@ -167,6 +179,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         
         # for safe_call
         request_id = self._get_request_id(request)
+
         if request_id and self.raft.is_request_executed(request_id):
             cached_response = self.raft.get_cached_response(request_id)
             response.handle = cached_response.get('handle', 0)
@@ -188,7 +201,8 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             self.raft.set(f"handle_{handle}", {
                 'filename': request.filename,
                 'path': file_path,
-            })           
+            })
+
             response.handle = handle
             print(f"[AFS Server] Created file: {request.filename} with handle {handle}")
 
@@ -200,6 +214,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
 
         except Exception as e:
             response.error = str(e)
+            
             print(f"[AFS Server] Error creating file: {e}")
             if request_id:
                 self.raft.mark_request_executed(request_id, {
@@ -229,6 +244,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         # main implementation
         try:
             handle_info = self.raft.get(f"handle_{request.handle}")
+            
             if not handle_info:
                 response.error = f"Invalid handle: {request.handle}"
                 print(f"[AFS Server] {response.error}")
@@ -255,6 +271,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         except Exception as e:
             response.error = str(e)
             print(f"[AFS Server] Error writing file: {e}")
+            
             if request_id:
                 self.raft.mark_request_executed(request_id, {
                    'success': False,
@@ -283,6 +300,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         # main implementation
         try:
             handle_info = self.raft.get(f"handle_{request.handle}")
+            
             if not handle_info:
                 response.error = f"Invalid handle: {request.handle}"
                 if request_id:
@@ -310,6 +328,7 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
             
         except Exception as e:
             response.error = str(e)
+            
             print(f"[AFS Server] Error closing file: {e}")
             
             if request_id:
@@ -326,14 +345,19 @@ class FileOperationServiceServicer(service.FileOperationServiceServicer):
         
         # Support both path-based and legacy mode
         if hasattr(request, 'file_path') and request.file_path:
+            
             # New mode: support multiple directories
             target_dir = ""
+            
             if request.file_path == "inputs":
                 target_dir = self.input_dir
+            
             elif request.file_path == "snapshots":
                 target_dir = self.snapshot_dir
+            
             elif request.file_path == "outputs":
                 target_dir = self.output_dir
+
 
             try:
                 if not target_dir:
@@ -382,15 +406,18 @@ def start_afs_server(node_id):
     abs_input_dir = os.path.normpath(os.path.join(PROJECT_ROOT, input_dir))
     abs_output_dir = os.path.normpath(os.path.join(PROJECT_ROOT, output_dir))
     abs_snapshot_dir = os.path.normpath(os.path.join(PROJECT_ROOT, snapshot_dir))
+    
     os.makedirs(abs_input_dir, exist_ok=True)
     os.makedirs(abs_output_dir, exist_ok=True)
     os.makedirs(abs_snapshot_dir, exist_ok=True)
     
     single_mode = os.getenv("SINGLE_MODE", "false").lower() == "true"
-
+    
+    # SINGLE MODE: 1 file server without replication
     if single_mode:
         print(f"[AFS Server({node_id})] Running in SINGLE MODE")
         raft_storage = SimpleStorage()
+    # not SINGLE_MODE: consists of raft cluster, with 3 servers worked as primary-backup
     else:
         self_address = f'localhost:{raft_port}'
         partners = []
@@ -404,11 +431,14 @@ def start_afs_server(node_id):
 
         timeout = 20
         start = time.time()
+        
+        # flush every 0.5 seconds
         while not raft_storage.isReady() and time.time() - start < timeout:
             time.sleep(0.5)
             print(".", end="", flush=True)
         print()
 
+        # get Leader node
         if raft_storage.isReady():
             leader = raft_storage._getLeader()
             if leader:
@@ -418,6 +448,7 @@ def start_afs_server(node_id):
         else:
             print(f"[AFS Server({node_id})] Raft is not ready, but will continue to retry.")
 
+    # initialize afs system
     max_workers = CONFIG.afs.can_handle_max_workers
     grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
     service.add_FileOperationServiceServicer_to_server(
@@ -435,6 +466,7 @@ def start_afs_server(node_id):
     try:
         while True:
             time.sleep(10)
+
             if raft_storage._isLeader():
                 print(f"[AFS Server({node_id})] Primary node is running")
             else:

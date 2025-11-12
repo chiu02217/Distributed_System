@@ -137,7 +137,7 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
         with self.processing_lock:
             if worker_id in self.assigned_tasks:
                 file_name = self.assigned_tasks[worker_id]
-                response.file_name = file_name
+                response.filename = file_name
                 response.has_task = True
                 response.is_resume = True
                 print(f"[Coordinator] Resuming task: {file_name} for worker {worker_id}")
@@ -153,10 +153,10 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
             
             file_name = self.task_queue.get()
             response.has_task = True
-            response.file_name = file_name
+            response.filename = file_name
             self.assigned_tasks[request.worker_id] = file_name
 
-            print(f"[Coordinator] Assigned task: {response.file_name} to worker {worker_id}.")
+            print(f"[Coordinator] Assigned task: {response.filename} to worker {worker_id}.")
             return response
         
         return response

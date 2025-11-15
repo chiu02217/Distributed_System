@@ -18,3 +18,4 @@ afs/temp
 afs/*
 data/input/input_dataset_biggest.txt
 data/snapshots/
+venv

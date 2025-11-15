@@ -181,14 +181,8 @@ class CoordinatorServicer(coordinator_service.CoordinatorServiceServicer, snapsh
             return response
         
         return response
-
+    # Worker submit task's result
     def SubmitResult(self, request: coordinator_messages.SubmitResultRequest, context):
-        """
-        Handle worker's result submission.
-        Logic:
-        1. Update the set of all primes with the primes received from the worker.
-        2. Remove the task from assigned_tasks.
-        """
         self.snapshot_manager.process_result_from_worker(request)
         # logic 1: update primes set
         with self.primes_lock:
